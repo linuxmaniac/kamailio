@@ -48,6 +48,7 @@ typedef struct acc_param {
 	int code;
 	str code_s;
 	str reason;
+	pv_spec_t  *spec;
 } acc_param_t;
 
 /* various acc variables */
