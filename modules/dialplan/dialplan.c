@@ -207,6 +207,11 @@ static int mod_init(void)
 
 static int child_init(int rank)
 {
+	if (rank<0)
+		return 0;
+
+	if(init_pv_data(0)<0)
+		LM_ERR("error init pv data\n");
 	return 0;
 }
 

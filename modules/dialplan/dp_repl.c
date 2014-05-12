@@ -127,13 +127,14 @@ error:
 #define MAX_PHONE_NB_DIGITS		127
 static char dp_output_buf[MAX_PHONE_NB_DIGITS+1];
 int rule_translate(struct sip_msg *msg, str string, dpl_node_t * rule,
-		str * result)
+		dpl_pv_node_t * rule_pv, str * result)
 {
 	int repl_nb, offset, match_nb, rc, cap_cnt;
 	struct replace_with token;
 	pcre *subst_comp;
 	struct subst_expr * repl_comp;
 	str match;
+	str match_exp, subst_exp;
 	pv_value_t sv;
 	str* uri;
 	int ovector[3 * (MAX_REPLACE_WITH + 1)];
@@ -144,7 +145,25 @@ int rule_translate(struct sip_msg *msg, str string, dpl_node_t * rule,
 	result->s = dp_output_buf;
 	result->len = 0;
 
-	subst_comp 	= rule->subst_comp;
+	if(rule_pv&&(rule!=rule_pv->orig)){
+		LM_ERR("rule and rule_pv don not match\n");
+		return -1;
+	}
+
+	if(rule_pv&&(rule_pv->orig->pv_flags&DP_PV_SUBST)){
+		subst_comp 	= rule_pv->subst_comp;
+		subst_exp = rule_pv->subst_exp;
+	}
+	else{
+		subst_comp 	= rule->subst_comp;
+		subst_exp = rule->subst_exp;
+	}
+	if(rule_pv&&(rule_pv->orig->pv_flags&DP_PV_MATCH)){
+		match_exp = rule_pv->match_exp;
+	}
+	else{
+		match_exp = rule->match_exp;
+	}
 	repl_comp 	= rule->repl_comp;
 
 	if(!repl_comp){
@@ -168,13 +187,13 @@ int rule_translate(struct sip_msg *msg, str string, dpl_node_t * rule,
 		}
 
 		/*search for the pattern from the compiled subst_exp*/
-		if (pcre_exec(rule->subst_comp, NULL, string.s, string.len,
+		if (pcre_exec(subst_comp, NULL, string.s, string.len,
 					0, 0, ovector, 3 * (MAX_REPLACE_WITH + 1)) <= 0) {
 			LM_ERR("the string %.*s matched "
 					"the match_exp %.*s but not the subst_exp %.*s!\n", 
 					string.len, string.s, 
-					rule->match_exp.len, rule->match_exp.s,
-					rule->subst_exp.len, rule->subst_exp.s);
+					match_exp.len, match_exp.s,
+					subst_exp.len, subst_exp.s);
 			return -1;
 		}
 	}
@@ -308,13 +327,141 @@ error:
 	return -1;
 }
 
+dpl_pv_node_p get_pv_rule(dpl_node_p rule, unsigned int index, unsigned int user_len)
+{
+	dpl_pv_id_p idp;
+	dpl_pv_index_p indexp;
+	dpl_pv_node_p rulep;
+
+
+	idp = select_pv_dpid(index);
+	if(!idp) {
+		LM_ERR("no pv idp:%d\n", rule->dpid);
+		return NULL;
+	}
+	for(indexp = idp->first_index; indexp!=NULL; indexp = indexp->next)
+		if(!indexp->len || (indexp->len!=0 && indexp->len == user_len) )
+			break;
+
+	if(!indexp || (indexp!= NULL && !indexp->first_rule)){
+		LM_DBG("no pv rule for len %i\n", user_len);
+		return NULL;
+	}
+
+search_rule:
+	for(rulep=indexp->first_rule; rulep!=NULL; rulep= rulep->next) {
+		if(rulep->orig==rule) return rulep;
+	}
+
+	/*test the rules with len 0*/
+	if(indexp->len){
+		for(indexp = indexp->next; indexp!=NULL; indexp = indexp->next)
+			if(!indexp->len)
+				break;
+		if(indexp)
+			goto search_rule;
+	}
+
+	LM_DBG("no matching rule\n");
+	return NULL;
+}
+
+/* Compile pcre pattern */
+static pcre *reg_ex_comp_pv(const char *pattern, int *cap_cnt)
+{
+	pcre *re;
+	const char *error;
+	int rc, err_offset;
+	size_t size;
+
+	re = pcre_compile(pattern, 0, &error, &err_offset, NULL);
+	if (re == NULL) {
+		LM_ERR("PCRE compilation of '%s' failed at offset %d: %s\n",
+				pattern, err_offset, error);
+		return NULL;
+	}
+	rc = pcre_fullinfo(re, NULL, PCRE_INFO_SIZE, &size);
+	if (rc != 0) {
+		pcre_free(re);
+		LM_ERR("pcre_fullinfo on compiled pattern '%s' yielded error: %d\n",
+				pattern, rc);
+		return NULL;
+	}
+	rc = pcre_fullinfo(re, NULL, PCRE_INFO_CAPTURECOUNT, cap_cnt);
+	if (rc != 0) {
+		pcre_free(re);
+		LM_ERR("pcre_fullinfo on compiled pattern '%s' yielded error: %d\n",
+				pattern, rc);
+		return NULL;
+	}
+	return re;
+}
+
+int build_pv_comp(struct sip_msg *msg, dpl_pv_node_t *rule)
+{
+	int cap_cnt = 0;
+	struct subst_expr *repl_comp = NULL;
+
+	if(!rule)
+		return -1;
+
+	if(rule->orig->pv_flags&DP_PV_MATCH){
+		if(pv_printf_s(msg, rule->match_elem, &(rule->match_exp))<0){
+ 			LM_ERR("Can't get match expression value\n");
+ 			return -1;
+ 		}
+ 		if(rule->match_comp) pcre_free(rule->match_comp);
+		rule->match_comp = reg_ex_comp_pv(rule->match_exp.s, &cap_cnt);
+		if(!rule->match_comp){
+			LM_ERR("failed to compile match expression %.*s\n",
+					rule->match_exp.len, rule->match_exp.s);
+			return -1;
+		}
+	}
+
+	if(rule->orig->pv_flags&DP_PV_SUBST){
+		if(pv_printf_s(msg, rule->subst_elem, &(rule->subst_exp))<0){
+ 			LM_ERR("Can't get subst expression value\n");
+ 			return -1;
+ 		}
+ 		if(rule->subst_comp) pcre_free(rule->subst_comp);
+		rule->subst_comp = reg_ex_comp_pv(rule->subst_exp.s, &cap_cnt);
+		if(!rule->subst_comp){
+			LM_ERR("failed to compile subst expression %.*s\n",
+					rule->subst_exp.len, rule->subst_exp.s);
+			return -1;
+		}
+		if (cap_cnt > MAX_REPLACE_WITH) {
+			LM_ERR("subst expression %.*s has too many sub-expressions\n",
+					rule->subst_exp.len, rule->subst_exp.s);
+			return -1;
+		}
+	}
+
+	if(rule->orig->pv_flags&DP_PV_MASK) {
+		repl_comp = rule->orig->repl_comp;
+		if (repl_comp && (cap_cnt < repl_comp->max_pmatch) &&
+				(repl_comp->max_pmatch != 0)) {
+			LM_ERR("repl_exp %.*s refers to %d sub-expressions, but "
+					"subst_exp %.*s has only %d\n",
+					rule->orig->repl_exp.len, rule->orig->repl_exp.s,
+					repl_comp->max_pmatch, rule->subst_exp.len,
+					rule->subst_exp.s, cap_cnt);
+			return -1;
+		}
+	}
+	return 0;
+}
+
 #define DP_MAX_ATTRS_LEN	128
 static char dp_attrs_buf[DP_MAX_ATTRS_LEN+1];
 int translate(struct sip_msg *msg, str input, str *output, dpl_id_p idp,
 		str *attrs)
 {
 	dpl_node_p rulep;
+	dpl_pv_node_p rule_pv;
 	dpl_index_p indexp;
+	pcre *match_comp = NULL;
 	int user_len, rez;
 	char b;
 
@@ -339,7 +486,27 @@ search_rule:
 
 			case DP_REGEX_OP:
 				LM_DBG("regex operator testing\n");
-				rez = pcre_exec(rulep->match_comp, NULL, input.s, input.len,
+				if(rulep->pv_flags&DP_PV_MATCH) {
+					if(!msg) {
+						LM_ERR("Cannot translate using a regex match with pv "
+							"without message\n");
+						continue;
+					}
+					rule_pv = get_pv_rule(rulep, idp->dp_id, user_len);
+					if(rule_pv) {
+						if(build_pv_comp(msg, rule_pv)<0){
+							LM_ERR("error rule regex comp. Skip this\n");
+							continue;
+						}
+						match_comp = rule_pv->match_comp;
+					}
+					else {
+						LM_ERR("pv rule not found.Skip this\n");
+						continue;
+					}
+				}
+				else match_comp = rulep->match_comp;
+				rez = pcre_exec(match_comp, NULL, input.s, input.len,
 						0, 0, NULL, 0);
 				break;
 
@@ -382,8 +549,9 @@ search_rule:
 	return -1;
 
 repl:
-	LM_DBG("found a matching rule %p: pr %i, match_exp %.*s\n",
-			rulep, rulep->pr, rulep->match_exp.len, rulep->match_exp.s);
+	LM_DBG("found a matching rule %p: pr %i, match_exp %.*s pv_flags:%d\n",
+			rulep, rulep->pr, rulep->match_exp.len, rulep->match_exp.s,
+			rulep->pv_flags);
 
 	if(attrs) {
 		attrs->len = 0;
@@ -405,7 +573,10 @@ repl:
 		}
 	}
 
-	if(rule_translate(msg, input, rulep, output)!=0){
+	if(!(rulep->pv_flags&DP_PV_MASK))
+		rule_pv = NULL;
+
+	if(rule_translate(msg, input, rulep, rule_pv, output)!=0){
 		LM_ERR("could not build the output\n");
 		return -1;
 	}

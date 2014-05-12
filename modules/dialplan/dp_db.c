@@ -70,6 +70,9 @@ static db_func_t dp_dbf;
 		(_res).len = strlen(VAL_STR((_values)+ (_index)).s);\
 	}while(0);
 
+int generate_pv_hash(void);
+void destroy_pv_rule(dpl_pv_node_t * rule);
+void destroy_pv_hash(void);
 void destroy_rule(dpl_node_t * rule);
 void destroy_hash(int);
 
@@ -78,12 +81,16 @@ int add_rule2hash(dpl_node_t *, int);
 
 void list_rule(dpl_node_t * );
 void list_hash(int h_index);
-
+void list_pv_rule(dpl_pv_node_t * );
+void list_pv_hash(void);
+void show_pv_flags(unsigned int flag);
 
 dpl_id_p* rules_hash = NULL;
 int * crt_idx, *next_idx;
+int *sh_revision;
+int  pv_revision = 0;
 
-
+dpl_pv_id_p rules_pv_hash = NULL;
 
 int init_db_data(void)
 {
@@ -163,14 +170,15 @@ int init_data(void)
 	}
 	rules_hash[0] = rules_hash[1] = 0;
 
-	p = (int *)shm_malloc(2*sizeof(int));
+	p = (int *)shm_malloc(3*sizeof(int));
 	if(!p){
 		LM_ERR("out of shm memory\n");
 		return -1;
 	}
 	crt_idx = p;
 	next_idx = p+1;
-	*crt_idx = *next_idx = 0;
+	sh_revision = p+2;
+	*crt_idx = *next_idx = *sh_revision = 0;
 
 	LM_DBG("trying to initialize data from db\n");
 	if(init_db_data() != 0)
@@ -193,6 +201,22 @@ void destroy_data(void)
 		shm_free(crt_idx);
 }
 
+void destroy_pv_data(void)
+{
+	if(rules_pv_hash) {
+		destroy_pv_hash();
+		rules_pv_hash = NULL;
+	}
+}
+
+int init_pv_data(void)
+{
+	destroy_pv_data();
+	if (generate_pv_hash()<0) {
+		return -1;
+	}
+	return 0;
+}
 
 /*load rules from DB*/
 int dp_load_db(void)
@@ -283,6 +307,8 @@ end:
 	*crt_idx = *next_idx;
 	list_hash(*crt_idx);
 	dp_dbf.free_result(dp_db_handle, res);
+	*sh_revision = (*sh_revision) + 1;
+	LM_DBG("loaded revision:%d\n", *sh_revision);
 	return 0;
 
 err2:
@@ -352,6 +378,84 @@ static pcre *reg_ex_comp(const char *pattern, int *cap_cnt)
 	return result;
 }
 
+int check_pv_marker(str orig, str *dest)
+{
+	if(dest==NULL||orig.len<1) return -1;
+	dest->s = orig.s;
+	if(orig.s[orig.len-1]==PV_MARKER)
+	{
+		LM_DBG("PV_MARKER detected at the end\n");
+		dest->len = orig.len - 1;
+		return 1;
+	}
+	else
+	{
+		dest->len = orig.len;
+		return 0;
+	}
+}
+
+dpl_pv_node_t * build_pv_rule(dpl_node_t *rule)
+{
+	pv_elem_p match_elem = NULL, subst_elem = NULL;
+	str match_exp = {NULL,0}, subst_exp = {NULL,0};
+	dpl_pv_node_t * new_rule = NULL;
+
+	if(!rule)
+		return NULL;
+
+	if(rule->pv_flags&DP_PV_MATCH)
+	{
+		match_exp.s = rule->match_exp.s;
+		if(rule->pv_flags&DP_PV_MATCH_M){
+			match_exp.len = rule->match_exp.len - 1;
+		}
+		else match_exp.len = rule->match_exp.len;
+		if(pv_parse_format(&match_exp, &match_elem)<0){
+			LM_ERR("parsing match_exp:%.*s\n",
+				match_exp.len, match_exp.s);
+			goto err;
+		}
+	}
+
+	if(rule->pv_flags&DP_PV_SUBST)
+	{
+		subst_exp.s = rule->subst_exp.s;
+		if(rule->pv_flags&DP_PV_SUBST_M){
+			subst_exp.len = rule->subst_exp.len - 1;
+		}
+		else subst_exp.len = rule->subst_exp.len;
+		if(pv_parse_format(&subst_exp, &subst_elem)<0){
+			LM_ERR("parsing subst_exp:%.*s\n",
+				subst_exp.len, subst_exp.s);
+			goto err;
+		}
+	}
+
+	if(rule->pv_flags&DP_PV_MASK){
+		new_rule = (dpl_pv_node_t *)pkg_malloc(sizeof(dpl_pv_node_t));
+		if(!new_rule){
+			LM_ERR("out of pkg memory(new_rule)\n");
+			goto err;
+		}
+		memset(new_rule, 0, sizeof(dpl_pv_node_t));
+		if(rule->pv_flags&DP_PV_MATCH) {
+			new_rule->match_elem = match_elem;
+		}
+		if(rule->pv_flags&DP_PV_SUBST) {
+			new_rule->subst_elem = subst_elem;
+		}
+		new_rule->orig = rule;
+	}
+	return new_rule;
+
+err:
+	if(match_elem) pv_elem_free_all(match_elem);
+	if(subst_elem) pv_elem_free_all(subst_elem);
+	if(new_rule) destroy_pv_rule(new_rule);
+	return NULL;
+}
+
 
 /*compile the expressions, and if ok, build the rule */
 dpl_node_t * build_rule(db_val_t * values)
@@ -359,9 +463,10 @@ dpl_node_t * build_rule(db_val_t * values)
 	pcre *match_comp, *subst_comp;
 	struct subst_expr *repl_comp;
 	dpl_node_t * new_rule;
-	str match_exp, subst_exp, repl_exp, attrs;
+	str match_exp, subst_exp, repl_exp, attrs, tmp;
 	int matchop;
 	int cap_cnt=0;
+	unsigned int pv_flags = 0;
 
 	matchop = VAL_INT(values+2);
 
@@ -377,11 +482,21 @@ dpl_node_t * build_rule(db_val_t * values)
 
 	GET_STR_VALUE(match_exp, values, 3);
 	if(matchop == DP_REGEX_OP){
-		match_comp = reg_ex_comp(match_exp.s, &cap_cnt);
-		if(!match_comp){
-			LM_ERR("failed to compile match expression %.*s\n",
-					match_exp.len, match_exp.s);
-			goto err;
+		if(check_pv_marker(match_exp, &tmp))
+			pv_flags |= DP_PV_MATCH_M;
+		if(pv_check_format(&tmp)<0){
+			pv_flags &= ~DP_PV_MATCH_MASK;
+			match_comp = reg_ex_comp(match_exp.s, &cap_cnt);
+			if(!match_comp){
+				LM_ERR("failed to compile match expression %.*s\n",
+						match_exp.len, match_exp.s);
+				goto err;
+			}
+		}
+		else{
+			pv_flags |= DP_PV_MATCH;
+			LM_DBG("match_exp DP_PV_MATCH_MASK\n");
+			match_comp = NULL;
 		}
 	}
 
@@ -398,26 +513,38 @@ dpl_node_t * build_rule(db_val_t * values)
 
 	GET_STR_VALUE(subst_exp, values, 5);
 	if(subst_exp.s && subst_exp.len){
-		subst_comp = reg_ex_comp(subst_exp.s, &cap_cnt);
-		if(!subst_comp){
-			LM_ERR("failed to compile subst expression %.*s\n",
-					subst_exp.len, subst_exp.s);
-			goto err;
+		if(check_pv_marker(subst_exp, &tmp))
+			pv_flags |= DP_PV_SUBST_M;
+		if(pv_check_format(&tmp)<0){
+			pv_flags &= ~DP_PV_SUBST_MASK;
+			subst_comp = reg_ex_comp(subst_exp.s, &cap_cnt);
+			if(!subst_comp){
+				LM_ERR("failed to compile subst expression %.*s\n",
+						subst_exp.len, subst_exp.s);
+				goto err;
+			}
+			if (cap_cnt > MAX_REPLACE_WITH) {
+				LM_ERR("subst expression %.*s has too many sub-expressions\n",
+						subst_exp.len, subst_exp.s);
+				goto err;
+			}
 		}
-		if (cap_cnt > MAX_REPLACE_WITH) {
-			LM_ERR("subst expression %.*s has too many sub-expressions\n",
-					subst_exp.len, subst_exp.s);
-			goto err;
+		else{
+			pv_flags |= DP_PV_SUBST;
+			LM_DBG("subst_exp DP_PV_SUBST_MASK\n");
+			subst_comp = NULL;
 		}
 	}
 
-	if (repl_comp && (cap_cnt < repl_comp->max_pmatch) && 
-			(repl_comp->max_pmatch != 0)) {
-		LM_ERR("repl_exp %.*s refers to %d sub-expressions, but "
-				"subst_exp %.*s has only %d\n",
-				repl_exp.len, repl_exp.s, repl_comp->max_pmatch,
-				subst_exp.len, subst_exp.s, cap_cnt);
-		goto err;
+	if((pv_flags&DP_PV_MASK)==0) {
+		if (repl_comp && (cap_cnt < repl_comp->max_pmatch) &&
+				(repl_comp->max_pmatch != 0)) {
+			LM_ERR("repl_exp %.*s refers to %d sub-expressions, but "
+					"subst_exp %.*s has only %d\n",
+					repl_exp.len, repl_exp.s, repl_comp->max_pmatch,
+					subst_exp.len, subst_exp.s, cap_cnt);
+			goto err;
+		}
 	}
 
 	new_rule = (dpl_node_t *)shm_malloc(sizeof(dpl_node_t));
@@ -450,6 +577,7 @@ dpl_node_t * build_rule(db_val_t * values)
 	new_rule->match_comp = match_comp;
 	new_rule->subst_comp = subst_comp;
 	new_rule->repl_comp  = repl_comp;
+	new_rule->pv_flags = pv_flags;
 
 	return new_rule;
 
@@ -550,6 +678,85 @@ err:
 	return -1;
 }
 
+int add_rule2hash_pv(dpl_pv_node_t * rule)
+{
+	dpl_pv_id_p crt_idp, last_idp;
+	dpl_pv_index_p indexp, last_indexp, new_indexp;
+	int new_id = 0;
+
+	/*search for the corresponding dpl_id*/
+	for(crt_idp = last_idp =rules_pv_hash; crt_idp!= NULL;
+			last_idp = crt_idp, crt_idp = crt_idp->next)
+		if(crt_idp->dp_id == rule->orig->dpid)
+			break;
+
+	/*didn't find a dpl_id*/
+	if(!crt_idp){
+		crt_idp = (dpl_pv_id_t*)pkg_malloc(sizeof(dpl_pv_id_t));
+		if(!crt_idp){
+			LM_ERR("out of pkg memory (crt_idp)\n");
+			return -1;
+		}
+		memset(crt_idp, 0, sizeof(dpl_pv_id_t));
+		crt_idp->dp_id = rule->orig->dpid;
+		new_id = 1;
+		LM_DBG("new dpl_pv_id %i %p\n", rule->orig->dpid, crt_idp);
+	}
+
+	/*search for the corresponding dpl_index*/
+	for(indexp = last_indexp =crt_idp->first_index; indexp!=NULL;
+			last_indexp = indexp, indexp = indexp->next){
+		if(indexp->len == rule->orig->matchlen)
+			goto add_rule;
+		if((rule->orig->matchlen!=0)&&
+			((indexp->len)?(indexp->len>rule->orig->matchlen):1))
+			goto add_index;
+	}
+
+add_index:
+	LM_DBG("new index , len %i\n", rule->orig->matchlen);
+
+	new_indexp = (dpl_pv_index_t *)pkg_malloc(sizeof(dpl_pv_index_t));
+	if(!new_indexp){
+		LM_ERR("out of pkg memory\n");
+		goto err;
+	}
+	memset(new_indexp , 0, sizeof(dpl_pv_index_t));
+	new_indexp->next = indexp;
+	new_indexp->len = rule->orig->matchlen;
+
+	/*add as first index*/
+	if(last_indexp == indexp){
+		crt_idp->first_index = new_indexp;
+	}else{
+		last_indexp->next = new_indexp;
+	}
+
+	indexp = new_indexp;
+
+add_rule:
+	rule->next = 0;
+	if(!indexp->first_rule)
+		indexp->first_rule = rule;
+
+	if(indexp->last_rule)
+		indexp->last_rule->next = rule;
+
+	indexp->last_rule = rule;
+
+	if(new_id){
+		crt_idp->next = rules_pv_hash;
+		rules_pv_hash = crt_idp;
+	}
+	/*list_pv_rule(rule);*/
+
+	return 0;
+
+err:
+	if(new_id)
+		pkg_free(crt_idp);
+	return -1;
+}
 
 void destroy_hash(int index)
 {
@@ -589,6 +796,114 @@ void destroy_hash(int index)
 	rules_hash[index] = 0;
 }
 
+int generate_pv_hash(void)
+{
+	dpl_id_p crt_idp;
+	dpl_index_p indexp;
+	dpl_node_p rulep;
+	dpl_pv_node_p rule_pv;
+	int h_index = *crt_idx;
+
+	if(!rules_hash[h_index])
+		return -1;
+
+	if(*sh_revision==pv_revision){
+		LM_DBG("already loaded\n");
+		return 0;
+	}
+
+	for(crt_idp=rules_hash[h_index]; crt_idp!=NULL; crt_idp = crt_idp->next){
+		LM_DBG("DPID: %i, pointer %p\n", crt_idp->dp_id, crt_idp);
+		for(indexp=crt_idp->first_index; indexp!=NULL;indexp= indexp->next){
+			LM_DBG("INDEX LEN: %i\n", indexp->len);
+			for(rulep = indexp->first_rule; rulep!= NULL;rulep = rulep->next){
+				if(rulep->pv_flags&DP_PV_MASK){
+					rule_pv = build_pv_rule(rulep);
+					if(rule_pv){
+						if(add_rule2hash_pv(rule_pv)<0) {
+							LM_ERR("error adding pv rule\n");
+							goto err;
+						}
+					}
+					else {
+						LM_ERR("error building pv rule\n");
+						goto err;
+					}
+				}
+			}
+		}
+	}
+	pv_revision = *sh_revision;
+	return 0;
+
+err:
+	if(rule_pv) {
+		destroy_pv_rule(rule_pv);
+		pkg_free(rule_pv);
+	}
+	return -1;
+}
+
+void destroy_pv_hash(void)
+{
+	dpl_pv_id_p crt_idp;
+	dpl_pv_index_p indexp;
+	dpl_pv_node_p rulep;
+
+	if(!rules_pv_hash)
+		return;
+
+	for(crt_idp = rules_pv_hash; crt_idp != NULL;){
+
+		for(indexp = crt_idp->first_index; indexp != NULL;){
+
+			for(rulep = indexp->first_rule; rulep!= NULL;){
+
+				destroy_pv_rule(rulep);
+
+				indexp->first_rule = rulep->next;
+				pkg_free(rulep);
+				rulep=0;
+				rulep= indexp->first_rule;
+			}
+			crt_idp->first_index= indexp->next;
+			pkg_free(indexp);
+			indexp=0;
+			indexp = crt_idp->first_index;
+
+		}
+
+		rules_pv_hash = crt_idp->next;
+		pkg_free(crt_idp);
+		crt_idp = 0;
+		crt_idp = rules_pv_hash;
+	}
+
+	rules_pv_hash = 0;
+}
+
+void destroy_pv_rule(dpl_pv_node_t * rule){
+	if(!rule)
+		return;
+
+	LM_DBG("destroying pv_rule %i\n", rule->orig->dpid);
+	if(rule->match_comp){
+		pcre_free(rule->match_comp);
+		rule->match_comp = NULL;
+	}
+	if(rule->subst_comp){
+		pcre_free(rule->subst_comp);
+		rule->subst_comp = NULL;
+	}
+	if(rule->match_elem){
+		pv_elem_free_all(rule->match_elem);
+		rule->match_elem = NULL;
+	}
+	if(rule->subst_elem){
+		pv_elem_free_all(rule->subst_elem);
+		rule->subst_elem = NULL;
+	}
+}
 
 void destroy_rule(dpl_node_t * rule){
 
@@ -619,6 +934,8 @@ void destroy_rule(dpl_node_t * rule){
 
 	if(rule->attrs.s)
 		shm_free(rule->attrs.s);
+
+	lock_destroy(rule->lock);
 }
 
 
@@ -636,6 +953,25 @@ dpl_id_p select_dpid(int id)
 	return NULL;
 }
 
+dpl_pv_id_p select_pv_dpid(int id)
+{
+	dpl_pv_id_p idp;
+
+	if(*sh_revision!=pv_revision){
+		LM_DBG("new revision:%d detected\n", *sh_revision);
+		if(init_pv_data()<0){
+			LM_ERR("error reloading pv rules\n");
+			return NULL;
+		}
+	}
+
+	for(idp = rules_pv_hash; idp!=NULL; idp = idp->next){
+		if(idp->dp_id == id)
+			return idp;
+	}
+
+	return NULL;
+}
 
 /*FOR DEBUG PURPOSE*/
 void list_hash(int h_index)
@@ -671,4 +1007,41 @@ void list_rule(dpl_node_t * rule)
 			rule->repl_exp.len, rule->repl_exp.s,
 			rule->attrs.len,	rule->attrs.s);
 
+}
+
+void list_pv_hash(void)
+{
+	dpl_pv_id_p crt_idp;
+	dpl_pv_index_p indexp;
+	dpl_pv_node_p rulep;
+
+	for(crt_idp=rules_pv_hash; crt_idp!=NULL; crt_idp = crt_idp->next){
+		LM_DBG("DPID: %i, pointer %p\n", crt_idp->dp_id, crt_idp);
+		for(indexp=crt_idp->first_index; indexp!=NULL;indexp= indexp->next){
+			LM_DBG("INDEX LEN: %i\n", indexp->len);
+			for(rulep = indexp->first_rule; rulep!= NULL;rulep = rulep->next){
+				list_pv_rule(rulep);
+			}
+		}
+	}
+}
+
+void list_pv_rule(dpl_pv_node_t * rule)
+{
+	LM_DBG("PV_RULE %p: next %p match_exp %.*s, "
+			"subst_exp %.*s \n", rule, rule->next,
+			rule->match_exp.len, rule->match_exp.s,
+			rule->subst_exp.len, rule->subst_exp.s);
+}
+
+void show_pv_flags(unsigned int flag)
+{
+	if(flag&DP_PV_MATCH) LM_DBG("DP_PV_MATCH\n");
+	if(flag&DP_PV_MATCH_M) LM_DBG("DP_PV_MATCH_M\n");
+	if(flag&DP_PV_MATCH_MASK) LM_DBG("DP_PV_MATCH_MASK\n");
+	if(flag&DP_PV_SUBST) LM_DBG("DP_PV_SUBST\n");
+	if(flag&DP_PV_SUBST_M) LM_DBG("DP_PV_SUBST_M\n");
+	if(flag&DP_PV_SUBST_MASK) LM_DBG("DP_PV_SUBST_MASK\n");
+	if(flag&DP_PV_MASK) LM_DBG("DP_PV_MASK\n");
+	LM_DBG("--pv_flags:%d\n", flag);
 }
