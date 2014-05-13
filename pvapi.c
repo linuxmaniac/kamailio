@@ -1078,6 +1078,56 @@ error:
 }
 
 /**
+ * check if string has pvs
+ * returns -1 if false or error, 0 if ok
+ */
+int pv_check_format(str *in)
+{
+	char *p, *p0;
+	int n = 0;
+	pv_spec_t *spec = NULL;
+	str s;
+	int len;
+
+	if(in==NULL || in->s==NULL)
+		return -1;
+
+	LM_DBG("parsing [%.*s]\n", in->len, in->s);
+
+	if(in->len == 0)
+		return -1;
+
+	p = in->s;
+
+	while(is_in_str(p,in))
+	{
+		n++;
+		while(is_in_str(p,in) && *p!=PV_MARKER)
+			p++;
+		if(*p == '\0' || !is_in_str(p,in))
+			break;
+		s.s = p;
+		s.len = in->s+in->len-p;
+		spec = pv_spec_lookup(&s, &len);
+		if(spec==NULL)
+			return -1;
+		p0 = p + len;
+		if(p0==NULL)
+			return -1;
+		if(*p0 == '\0')
+			break;
+		p = p0;
+	}
+	if(!spec){
+		LM_DBG("no pv found\n");
+		return -1;
+	}
+	LM_DBG("format parsed OK: [%d] items\n", n);
+
+	return 0;
+}
+
+/**
  *
  */
 int pv_get_spec_name(struct sip_msg* msg, pv_param_p ip, pv_value_t *name)
