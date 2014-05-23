@@ -70,6 +70,7 @@ str *dbg_get_state_name(int t)
 #define DBG_CFGTRACE_ON	(1<<0)
 #define DBG_ABKPOINT_ON	(1<<1)
 #define DBG_LBKPOINT_ON	(1<<2)
+#define DBG_CFGTEST_ON	(1<<3)
 
 static str _dbg_status_list[] = {
 	str_init("cfgtrace-on"),
@@ -78,6 +79,8 @@ static str _dbg_status_list[] = {
 	str_init("abkpoint-off"),
 	str_init("lbkpoint-on"),
 	str_init("lbkpoint-off"),
+	str_init("cfgtest-on"),
+	str_init("cfgtest-off"),
 	{0, 0}
 };
 
@@ -89,6 +92,8 @@ str *dbg_get_status_name(int t)
 		return &_dbg_status_list[2];
 	if(t&DBG_LBKPOINT_ON)
 		return &_dbg_status_list[4];
+	if(t&DBG_CFGTEST_ON)
+		return &_dbg_status_list[6];
 
 	return &_dbg_state_list[0];
 }
@@ -188,6 +193,11 @@ int _dbg_step_loops = 200;
  */
 int _dbg_reset_msgid = 0;
 
+ /**
+ * disabled by default
+ */
+int _dbg_cfgtest = 0;
+
 /**
  *
  */
@@ -211,12 +221,27 @@ typedef struct _dbg_pid
 	gen_lock_t *lock;
 	unsigned int reset_msgid; /* flag to reset the id */
 	unsigned int msgid_base; /* real id since the reset */
+	dbg_cfgt_node_p cfgt_node;
 } dbg_pid_t;
 
 /**
  *
  */
 static dbg_pid_t *_dbg_pid_list = NULL;
+
+dbg_cfgt_node_p dbg_get_cfgt_node(void) {
+	if ((_dbg_pid_list!=NULL) && (_dbg_pid_list+process_no!=NULL)) {
+		return _dbg_pid_list[process_no].cfgt_node;
+	}
+	return NULL;
+}
+int dbg_set_cfgt_node(dbg_cfgt_node_p node) {
+	if ((_dbg_pid_list!=NULL) && (_dbg_pid_list+process_no!=NULL)) {
+		_dbg_pid_list[process_no].cfgt_node = node;
+		return 1;
+	}
+	return 0;
+}
 
 /**
  *
@@ -321,6 +346,7 @@ int dbg_cfg_trace(void *data)
     pv_value_t val;
 	void **srevp;
 	str *an;
+	dbg_cfgt_node_p node;
 
 	srevp = (void**)data;
 
@@ -355,6 +381,16 @@ int dbg_cfg_trace(void *data)
 					a->type, an->len, ZSW(an->s)
 				);
 		}
+	}
+	if(_dbg_pid_list[process_no].set&DBG_CFGTEST_ON)
+	{
+		node = dbg_get_cfgt_node();
+		if(node)
+		{
+			if(dbg_cfgt_process_route(msg, node, a)<0)
+				LM_ERR("Error processing route\n");
+		}
+		else LM_ERR("node empty\n");
 	}
 	if(!(_dbg_pid_list[process_no].set&DBG_ABKPOINT_ON))
 	{
@@ -590,7 +626,9 @@ int dbg_init_mypid(void)
 		_dbg_pid_list[process_no].set |= DBG_ABKPOINT_ON;
 	if(_dbg_cfgtrace==1)
 		_dbg_pid_list[process_no].set |= DBG_CFGTRACE_ON;
-	if(_dbg_reset_msgid==1)
+	if(_dbg_cfgtest==1)
+		_dbg_pid_list[process_no].set |= DBG_CFGTEST_ON;
+	if(_dbg_reset_msgid==1||_dbg_cfgtest==1)
 	{
 		LM_DBG("[%d] create locks\n", process_no);
 		_dbg_pid_list[process_no].lock = lock_alloc();

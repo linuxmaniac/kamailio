@@ -71,6 +71,8 @@ extern char *_dbg_cfgtrace_lname;
 extern int _dbg_step_usleep;
 extern int _dbg_step_loops;
 extern int _dbg_reset_msgid;
+extern int _dbg_cfgtest;
+extern str _dbg_cfgt_hdr_name;
 
 static int _dbg_sip_msg_cline;
 static char * _dbg_cfgtrace_facility_str = 0;
@@ -111,6 +113,8 @@ static param_export_t params[]={
 	{"mod_facility",      PARAM_STRING|USE_FUNC_PARAM, (void*)dbg_mod_facility_param},
 	{"reset_msgid",       INT_PARAM, &_dbg_reset_msgid},
 	{"cfgpkgcheck",       INT_PARAM, &_dbg_cfgpkgcheck},
+	{"cfgtest",           INT_PARAM, &_dbg_cfgtest},
+	{"cfgt_hdr_name",     PARAM_STRING, &_dbg_cfgt_hdr_name},
 	{0, 0, 0}
 };
 
@@ -186,6 +190,17 @@ static int mod_init(void)
 			LM_ERR("could not insert callback");
 			return -1;
 		}
+	}
+	if(_dbg_cfgtest==1)
+	{
+		unsigned int ALL = REQUEST_CB+FAILURE_CB+ONREPLY_CB
+		  +BRANCH_CB+ONSEND_CB+ERROR_CB+LOCAL_CB+EVENT_CB+BRANCH_FAILURE_CB;
+		if (register_script_cb(dbg_cfgt_filter, PRE_SCRIPT_CB|ALL, 0) != 0)
+		{
+			LM_ERR("could not insert callback");
+			return -1;
+		}
+		dbg_init_cfgtest();
 	}
 	return dbg_init_bp_list();
 }

@@ -26,6 +26,7 @@
 #define _DEBUGGER_API_H_
 
 #include "../../route_struct.h"
+#include "debugger_cfgt.h"
 
 int dbg_add_breakpoint(struct action *a, int bpon);
 int dbg_init_bp_list(void);
@@ -51,6 +52,8 @@ void dbg_enable_log_assign(void);
  * \return 1 on success, -1 on failure
  */
 int dbg_msgid_filter(struct sip_msg *msg, unsigned int flags, void *bar);
+dbg_cfgt_node_p dbg_get_cfgt_node(void);
+int dbg_set_cfgt_node(dbg_cfgt_node_p);
 
 #define DBG_DP_NULL			1
 #define DBG_DP_AVP			2
