@@ -130,4 +130,29 @@ typedef struct _str str;
  */
 int str_append(str *orig, str *suffix, str *dest);
 
+/** Appends a sufffix
+ * @param orig is the original string
+ * @param suffix is the suffix string
+ * @param dest is the result ::str of appending suffix to orig
+ * @return 0 if ok -1 if error
+ * remember to free the dest->s share memory
+ */
+int str_append_shm(str *orig, str *suffix, str *dest);
+
+/** Copy a str in private memory
+ * @param orig is the original string
+ * @param dest is the result ::str
+ * @return 0 if ok -1 if error
+ * remember to free the dest->s private memory
+ */
+int str_copy(str *orig, str *dest);
+
+/** Copy a str in share memory
+ * @param orig is the original string
+ * @param dest is the result ::str
+ * @return 0 if ok -1 if error
+ * remember to free the dest->s share memory
+ */
+int str_copy_shm(str *orig, str *dest);
+
 #endif
