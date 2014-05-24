@@ -62,6 +62,7 @@ extern char *_dbg_cfgtrace_lname;
 extern int _dbg_step_usleep;
 extern int _dbg_step_loops;
 extern int _dbg_reset_msgid;
+extern int _dbg_cfgtest;
 
 static char * _dbg_cfgtrace_facility_str = 0;
 static int _dbg_log_assign = 0;
@@ -93,6 +94,7 @@ static param_export_t params[]={
 	{"mod_level",         STR_PARAM|USE_FUNC_PARAM, (void*)dbg_mod_level_param},
 	{"reset_msgid",       INT_PARAM, &_dbg_reset_msgid},
 	{"cfgpkgcheck",       INT_PARAM, &_dbg_cfgpkgcheck},
+	{"cfgtest",           INT_PARAM, &_dbg_cfgtest},
 	{0, 0, 0}
 };
 
@@ -168,6 +170,7 @@ static int mod_init(void)
 			return -1;
 		}
 	}
+	if(_dbg_cfgtest==1) dbg_init_cfgtest();
 	return dbg_init_bp_list();
 }
 

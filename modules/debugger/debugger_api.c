@@ -76,6 +76,7 @@ str *dbg_get_state_name(int t)
 #define DBG_CFGTRACE_ON	(1<<0)
 #define DBG_ABKPOINT_ON	(1<<1)
 #define DBG_LBKPOINT_ON	(1<<2)
+#define DBG_CFGTEST_ON	(1<<3)
 
 static str _dbg_status_list[] = {
 	str_init("cfgtrace-on"),
@@ -84,6 +85,8 @@ static str _dbg_status_list[] = {
 	str_init("abkpoint-off"),
 	str_init("lbkpoint-on"),
 	str_init("lbkpoint-off"),
+	str_init("cfgtest-on"),
+	str_init("cfgtest-off"),
 	{0, 0}
 };
 
@@ -95,6 +98,8 @@ str *dbg_get_status_name(int t)
 		return &_dbg_status_list[2];
 	if(t&DBG_LBKPOINT_ON)
 		return &_dbg_status_list[4];
+	if(t&DBG_CFGTEST_ON)
+		return &_dbg_status_list[6];
 
 	return &_dbg_state_list[0];
 }
@@ -195,6 +200,38 @@ int _dbg_step_loops = 200;
 int _dbg_reset_msgid = 0;
 
 /**
+ * disabled by default
+ */
+int _dbg_cfgtest = 0;
+
+#define DBG_CFGTEST_INF_FLOW 0
+#define DBG_CFGTEST_INF_IN   1
+#define DBG_CFGTEST_INF_OUT  2
+typedef struct _dbg_cfgtest_node
+{
+	srjson_doc_t *jdoc;
+	srjson_t *field[3];
+	str callid;
+	str route;
+	gen_lock_t *lock;
+	struct _dbg_cfgtest_node *next;
+} dbg_cfgtest_node_t, *dbg_cfgtest_node_p;
+
+typedef struct _dbg_cfgtest_info
+{
+	unsigned int size;
+	dbg_cfgtest_node_p first;
+	dbg_cfgtest_node_p last;
+} dbg_cfgtest_info_t, *dbg_cfgtest_info_p;
+
+static dbg_cfgtest_info_t *_dbg_cfgtest_info = NULL;
+/** defined later */
+dbg_cfgtest_node_p _dbg_cfgtest_get_node(struct sip_msg *msg);
+dbg_cfgtest_node_p dbg_cfgtest_create_node(struct sip_msg *msg,
+	struct action *act);
+void _dbg_cfgtest_destroy_node(dbg_cfgtest_node_p node);
+
+/**
  *
  */
 typedef struct _dbg_cmd
@@ -217,6 +254,7 @@ typedef struct _dbg_pid
 	gen_lock_t *lock;
 	unsigned int reset_msgid; /* flag to reset the id */
 	unsigned int msgid_base; /* real id since the reset */
+	dbg_cfgtest_node_p cfgtest_node;
 } dbg_pid_t;
 
 /**
@@ -333,6 +371,27 @@ int dbg_cfg_trace(void *data)
 					ZSW(a->cfile), a->cline, a->type, an->len, ZSW(an->s)
 				);
 		}
+	}
+	if(_dbg_pid_list[process_no].set&DBG_CFGTEST_ON)
+	{
+		if(msg->callid)
+		{
+			_dbg_pid_list[process_no].cfgtest_node = _dbg_cfgtest_get_node(msg);
+			if(!_dbg_pid_list[process_no].cfgtest_node)
+			{
+				LM_DBG("create cfgtest_node\n");
+				_dbg_pid_list[process_no].cfgtest_node =
+					dbg_cfgtest_create_node(msg, a);
+			}
+			if(_dbg_pid_list[process_no].cfgtest_node)
+			{
+				//lock_get(_dbg_pid_list[process_no].cfgtest_info->lock);
+				LM_DBG("inside lock\n");
+				//lock_release(_dbg_pid_list[process_no].cfgtest_info->lock);
+			}
+			else { LM_ERR("cannot get any cfgtest_node\n"); }
+		}
+		else LM_DBG("No callid\n");
 	}
 	if(!(_dbg_pid_list[process_no].set&DBG_ABKPOINT_ON))
 	{
@@ -568,6 +627,9 @@ int dbg_init_mypid(void)
 		_dbg_pid_list[process_no].set |= DBG_ABKPOINT_ON;
 	if(_dbg_cfgtrace==1)
 		_dbg_pid_list[process_no].set |= DBG_CFGTRACE_ON;
+	if(_dbg_cfgtest==1){
+		_dbg_pid_list[process_no].set |= DBG_CFGTEST_ON;
+	}
 	if(_dbg_reset_msgid==1)
 	{
 		LM_DBG("[%d] create locks\n", process_no);
@@ -1791,4 +1853,121 @@ int dbg_dump_json(struct sip_msg* msg, unsigned int mask, int level)
 error:
 	srjson_DestroyDoc(&jdoc);
 	return -1;
+}
+
+int dbg_init_cfgtest(void)
+{
+	_dbg_cfgtest_info = (dbg_cfgtest_info_p)
+		shm_malloc(sizeof(dbg_cfgtest_info_t));
+	if(_dbg_cfgtest_info==NULL)
+	{
+		LM_ERR("cannot allocate cfgtest_info\n");
+		return -1;
+	}
+	memset(_dbg_cfgtest_info, 0, sizeof(dbg_cfgtest_info_t));
+	return 0;
+}
+
+dbg_cfgtest_node_p dbg_cfgtest_create_node(struct sip_msg *msg,
+	struct action *act)
+{
+	srjson_t *jobj = NULL;
+	char *iname[3] = {"flow\0", "in\0", "out\0"};
+	int i;
+	dbg_cfgtest_node_p node;
+
+	if(_dbg_cfgtest_info== NULL)
+	{
+		LM_ERR("cfgtest_info is empty\n");
+		return NULL;
+	}
+	node = (dbg_cfgtest_node_p)	shm_malloc(sizeof(dbg_cfgtest_node_t));
+	if(node==NULL)
+	{
+		LM_ERR("cannot allocate cfgtest node\n");
+		return NULL;
+	}
+	memset(node, 0, sizeof(dbg_cfgtest_node_t));
+	node->lock = lock_alloc();
+	if(!node->lock || lock_init(node->lock)==NULL)
+	{
+		LM_ERR("cannot allocate or init the lock\n");
+		goto error;
+	}
+	if(str_copy_shm(&msg->callid->body, &node->callid)<0)
+	{
+		LM_ERR("error copying callid\n");
+		goto error;
+	}
+	node->jdoc = (srjson_doc_t *) shm_malloc(sizeof(srjson_doc_t));
+	if(node->jdoc==NULL)
+	{
+		LM_ERR("cannot allocate jdoc\n");
+		goto error;
+	}
+	srjson_InitDoc(node->jdoc, NULL);
+	if(node->jdoc->root==NULL)
+	{
+		LM_DBG("json root empty\n");
+		node->jdoc->root = srjson_CreateObject(node->jdoc);
+		if(node->jdoc->root==NULL)
+		{
+			LM_ERR("cannot create json root\n");
+			goto error;
+		}
+	}
+	for(i=0;i<3;i++)
+	{
+		jobj = srjson_CreateObject(node->jdoc);
+		if(jobj==NULL)
+		{
+			LM_ERR("cannot create json object\n");
+			goto error;
+		}
+		LM_DBG("Adding %s\n", iname[i]);
+		node->field[i] = jobj;
+		srjson_AddItemToObject(node->jdoc, node->jdoc->root, iname[i], jobj);
+	}
+	if(_dbg_cfgtest_info->last != NULL) _dbg_cfgtest_info->last->next = node;
+	_dbg_cfgtest_info->last = node;
+	if(_dbg_cfgtest_info->first == NULL) _dbg_cfgtest_info->first = node;
+	return node;
+error:
+	_dbg_cfgtest_destroy_node(node);
+	return NULL;
+}
+
+void _dbg_cfgtest_destroy_node(dbg_cfgtest_node_p node)
+{
+	if(node->jdoc) srjson_DestroyDoc(node->jdoc);
+	if(node->lock) { lock_destroy(node->lock); lock_dealloc(node->lock); }
+	if(node->callid.s) shm_free(node->callid.s);
+	shm_free(node);
+	return;
+}
+
+dbg_cfgtest_node_p _dbg_cfgtest_get_node(struct sip_msg *msg)
+{
+	dbg_cfgtest_node_p n;
+
+	if(_dbg_cfgtest_info == NULL || _dbg_cfgtest_info->first == NULL)
+	{
+		LM_DBG("info empty\n");
+		return NULL;
+	}
+	n = _dbg_cfgtest_info->first;
+	while(n)
+	{
+		LM_DBG("compare n:%.*s to callid:%.*s\n",
+			n->callid.len, n->callid.s,
+			msg->callid->body.len, msg->callid->body.s);
+		if(STR_EQ(n->callid, msg->callid->body))
+		{
+			LM_DBG("found cfgtest n for:%.*s",
+				n->callid.len, n->callid.s);
+			return n;
+		}
+		n = n->next;
+	};
+	return NULL;
 }
