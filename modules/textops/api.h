@@ -38,6 +38,9 @@ typedef int (*remove_hf_t)(struct sip_msg*, str*);
 typedef int (*search_append_t)(struct sip_msg*, str*, str*);
 typedef int (*search_t)(struct sip_msg*, str*);
 typedef int (*is_privacy_t)(struct sip_msg*, str*);
+typedef int (*set_multibody_t)(struct sip_msg* msg, str* p1, str* p2, str* p3);
+typedef int (*append_multibody_t)(struct sip_msg* msg, str* p1, str* p2, str* p3);
+typedef int (*remove_multibody_t)(struct sip_msg* msg, str* p1);
 
 /*
  * Struct with the textops api.
@@ -48,6 +51,9 @@ typedef struct textops_binds {
 	search_append_t search_append; // Append a str after a match of the specified regex.
 	search_t search; // Check if the regex matches a part of the message.
 	is_privacy_t	is_privacy;
+	set_multibody_t set_multibody;
+	append_multibody_t append_multibody;
+	remove_multibody_t remove_multibody;
 } textops_api_t;
 
 typedef int (*bind_textops_f)(textops_api_t*);

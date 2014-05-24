@@ -117,7 +117,6 @@ static int set_multibody_3(struct sip_msg* msg, char*, char *, char *);
 static int append_multibody_2(struct sip_msg* msg, char*, char *);
 static int append_multibody_3(struct sip_msg* msg, char*, char *, char *);
 static int fixup_multibody_f(void** param, int param_no);
-static int remove_multibody_f(struct sip_msg *msg, char *);
 static int get_body_part_raw_f(sip_msg_t* msg, char* ctype, char* ovar);
 static int get_body_part_f(sip_msg_t* msg, char* ctype, char* ovar);
 static int fixup_get_body_part(void** param, int param_no);
@@ -1940,7 +1939,7 @@ static inline int get_line(char *s, int len)
 	return 0;
 }
 
-static int remove_multibody_f(struct sip_msg* msg, char* p1)
+int remove_multibody_f(struct sip_msg* msg, char* p1)
 {
 	char *start, *end;
 	unsigned int len, t;

@@ -120,6 +120,21 @@ int is_privacy_api(struct sip_msg *msg, str* privacy_type){
 	return retval;
 }
 
+int set_multibody_api(struct sip_msg* msg, str* p1, str* p2, str* p3)
+{
+	return set_multibody_helper(msg, (char*)p1, (char*)p2, (char*)p3);
+}
+
+int append_multibody_api(struct sip_msg* msg, str* p1, str* p2, str* p3)
+{
+	return append_multibody_helper(msg, (char*)p1, (char*)p2, (char*)p3);
+}
+
+int remove_multibody_api(struct sip_msg* msg, str* p1)
+{
+	return remove_multibody_f(msg, (char*)p1);
+}
+
 /*
  * Function to load the textops api.
  */
@@ -133,5 +148,8 @@ int bind_textops(textops_api_t *tob){
 	tob->search_append=search_append_api;
 	tob->search=search_api;
 	tob->is_privacy=is_privacy_api;
+	tob->set_multibody=set_multibody_api;
+	tob->append_multibody=append_multibody_api;
+	tob->remove_multibody=remove_multibody_api;
 	return 0;
 }

@@ -36,6 +36,9 @@ int search_append_f(struct sip_msg*, char*, char*);
 int remove_hf_f(struct sip_msg* msg, char* str_hf, char* foo);
 int add_hf_helper(struct sip_msg* msg, str *str1, str *str2, gparam_p hfval, int mode, gparam_p hfanc);
 int is_privacy_f(struct sip_msg *msg, char *privacy, char *str2 );
+int set_multibody_helper(struct sip_msg* msg, char* p1, char* p2, char* p3);
+int append_multibody_helper(struct sip_msg* msg, char* p1, char* p2, char* p3);
+int remove_multibody_f(struct sip_msg* msg, char* p1);
 
 int fixup_regexp_none(void** param, int param_no);
 int fixup_free_regexp_none(void** param, int param_no);
