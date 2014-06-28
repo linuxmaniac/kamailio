@@ -46,10 +46,12 @@
 
 #define DP_PV_MATCH		(1 << 0)
 #define DP_PV_MATCH_M	(1 << 1) /* PV_MARKER at the end */
-#define DP_PV_SUBST		(1 << 2)
-#define DP_PV_SUBST_M	(1 << 3) /* PV_MARKER at the end */
+#define DP_PV_MATCH_AVP (1 << 2) /* AVP WITH AVP_INDEX_ALL */
+#define DP_PV_SUBST		(1 << 3)
+#define DP_PV_SUBST_M	(1 << 4) /* PV_MARKER at the end */
+#define DP_PV_SUBST_AVP (1 << 5) /* AVP WITH AVP_INDEX_ALL */
 
-#define DP_PV_MASK (DP_PV_MATCH|DP_PV_SUBST)
+#define DP_PV_MASK (DP_PV_MATCH|DP_PV_SUBST|DP_PV_MATCH_AVP|DP_PV_SUBST_AVP)
 #define DP_PV_MATCH_MASK (DP_PV_MATCH|DP_PV_MATCH_M)
 #define DP_PV_SUBST_MASK (DP_PV_SUBST|DP_PV_SUBST_M)
 
@@ -85,10 +87,18 @@ typedef struct dpl_id{
 	struct dpl_id * next;
 }dpl_id_t,*dpl_id_p;
 
+typedef struct dpl_pv_regex_node
+{
+	pcre *comp;
+	str expr;
+	int cap_cnt;
+	struct dpl_pv_regex_node *next;
+}dpl_pv_regex_node_t, *dpl_pv_regex_node_p;
+
 typedef struct dpl_pv_node{
 	pv_elem_p match_elem, subst_elem;
-	str match_exp, subst_exp; /* exp without end dollar char */
-	pcre *match_comp, *subst_comp; /* compiled patterns */
+	dpl_pv_regex_node_p match; /* list of match regex compiled */
+	dpl_pv_regex_node_p subst; /* list of subst regex compiled */
 
 	struct dpl_pv_node * next; /* next rule */
 	struct dpl_node * orig; /* shared rule */
@@ -131,5 +141,7 @@ dpl_pv_id_p select_pv_dpid(int id);
 struct subst_expr* repl_exp_parse(str subst);
 void repl_expr_free(struct subst_expr *se);
 int translate(struct sip_msg *msg, str user_name, str* repl_user, dpl_id_p idp, str *);
-int rule_translate(struct sip_msg *msg, str , dpl_node_t * rule, dpl_pv_node_t * rule_pv, str *);
+int rule_translate(struct sip_msg *msg, str , dpl_node_t * rule,
+	dpl_pv_node_t * rule_pv, dpl_pv_regex_node_p subst_node,
+	str *match_expr, str *);
 #endif

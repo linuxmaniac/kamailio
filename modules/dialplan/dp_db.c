@@ -396,41 +396,101 @@ int check_pv_marker(str orig, str *dest)
 	}
 }
 
-dpl_pv_node_t * build_pv_rule(dpl_node_t *rule)
+int set_pv_regex_avp_flag(const pv_elem_p elem, unsigned int *pv_flags,
+	const int match)
+{
+	int num, num_elem;
+	pv_elem_p e;
+	pv_spec_p spec, spec_check = NULL;
+	if(elem==NULL||pv_flags==NULL) return -1;
+
+	e = elem;
+	if (e==NULL) return -1;
+	spec = e->spec;
+	if (spec==NULL) return -1;
+
+	for(e=elem, num=num_elem=0; e!=NULL; e=e->next, num++)
+	{
+		spec = e->spec;
+		LM_DBG("elem[%d][%p][%.*s][%p]\n", num, e, e->text.len, e->text.s, spec);
+		if(spec!=NULL) num_elem++;
+		if(spec_check==NULL) spec_check = spec;
+	}
+
+	if(num_elem==1 && spec_check->type==PVT_AVP &&
+		spec_check->pvp.pvi.type==PV_IDX_ALL)
+	{
+		if(match==0)
+		{
+			*pv_flags |= DP_PV_MATCH_AVP;
+			*pv_flags &= ~DP_PV_MATCH;
+		}
+		else
+		{
+			*pv_flags |= DP_PV_SUBST_AVP;
+			*pv_flags &= ~DP_PV_SUBST;
+		}
+		return 0;
+	}
+	return 1;
+}
+
+int build_pv_rule_helper(const str orig, str *dest, const int flag[2],
+	pv_elem_p *elem, unsigned int *pv_flags, const int match)
+{
+
+	dest->s = orig.s;
+	if(flag[1]){
+		dest->len = orig.len - 1;
+	}
+	else dest->len = orig.len;
+	if(pv_parse_format(dest, elem)<0){
+		LM_ERR("parsing expr[%.*s]\n", dest->len, dest->s);
+		return -1;
+	}
+	LM_DBG("expr:[%.*s]\n", dest->len, dest->s);
+	if(flag[0]) { LM_DBG("AVP already detected\n"); return 0; }
+	switch(set_pv_regex_avp_flag(*elem, pv_flags, match))
+	{
+		case 0:
+			LM_DBG("AVP detected\n");
+			break;
+		case 1:
+			break;
+		default:
+			LM_ERR("detecting AVP\n");
+			pv_elem_free_all(*elem);
+			return -1;
+		break;
+	}
+	return 0;
+}
+
+dpl_pv_node_t * build_pv_rule(const dpl_node_p rule)
 {
 	pv_elem_p match_elem = NULL, subst_elem = NULL;
-	str match_exp = {NULL,0}, subst_exp = {NULL,0};
-	dpl_pv_node_t * new_rule = NULL;
-
+	str match_exp = STR_NULL, subst_exp = STR_NULL;
+	dpl_pv_node_p new_rule = NULL;
+	int flags[2];
 	if(!rule)
 		return NULL;
 
-	if(rule->pv_flags&DP_PV_MATCH)
+	if(rule->pv_flags&DP_PV_MATCH||rule->pv_flags&DP_PV_MATCH_AVP)
 	{
-		match_exp.s = rule->match_exp.s;
-		if(rule->pv_flags&DP_PV_MATCH_M){
-			match_exp.len = rule->match_exp.len - 1;
-		}
-		else match_exp.len = rule->match_exp.len;
-		if(pv_parse_format(&match_exp, &match_elem)<0){
-			LM_ERR("parsing match_exp:%.*s\n",
-				match_exp.len, match_exp.s);
+		flags[0] = rule->pv_flags&DP_PV_MATCH_AVP;
+		flags[1] = rule->pv_flags&DP_PV_MATCH_M;
+		if(build_pv_rule_helper(rule->match_exp, &match_exp,
+			flags, &match_elem, &(rule->pv_flags), 0)<0)
 			goto err;
-		}
 	}
 
-	if(rule->pv_flags&DP_PV_SUBST)
+	if(rule->pv_flags&DP_PV_SUBST||rule->pv_flags&DP_PV_SUBST_AVP)
 	{
-		subst_exp.s = rule->subst_exp.s;
-		if(rule->pv_flags&DP_PV_SUBST_M){
-			subst_exp.len = rule->subst_exp.len - 1;
-		}
-		else subst_exp.len = rule->subst_exp.len;
-		if(pv_parse_format(&subst_exp, &subst_elem)<0){
-			LM_ERR("parsing subst_exp:%.*s\n",
-				subst_exp.len, subst_exp.s);
+		flags[0] = rule->pv_flags&DP_PV_SUBST_AVP;
+		flags[1] = rule->pv_flags&DP_PV_SUBST_M;
+		if(build_pv_rule_helper(rule->subst_exp, &subst_exp,
+			flags, &subst_elem, &(rule->pv_flags), 1)<0)
 			goto err;
-		}
 	}
 
 	if(rule->pv_flags&DP_PV_MASK){
@@ -440,12 +500,8 @@ dpl_pv_node_t * build_pv_rule(dpl_node_t *rule)
 			goto err;
 		}
 		memset(new_rule, 0, sizeof(dpl_pv_node_t));
-		if(rule->pv_flags&DP_PV_MATCH) {
-			new_rule->match_elem = match_elem;
-		}
-		if(rule->pv_flags&DP_PV_SUBST) {
-			new_rule->subst_elem = subst_elem;
-		}
+		new_rule->match_elem = match_elem;
+		new_rule->subst_elem = subst_elem;
 		new_rule->orig = rule;
 	}
 	return new_rule;
@@ -681,7 +737,7 @@ err:
 	return -1;
 }
 
-int add_rule2hash_pv(dpl_pv_node_t * rule)
+int add_rule2hash_pv(dpl_pv_node_p rule)
 {
 	dpl_pv_id_p crt_idp, last_idp;
 	dpl_pv_index_p indexp, last_indexp, new_indexp;
@@ -886,17 +942,29 @@ void destroy_pv_hash(void)
 }
 
 void destroy_pv_rule(dpl_pv_node_t * rule){
+	dpl_pv_regex_node_p n, h;
+
 	if(!rule)
 		return;
 
 	LM_DBG("destroying pv_rule %i\n", rule->orig->dpid);
-	if(rule->match_comp){
-		pcre_free(rule->match_comp);
-		rule->match_comp = NULL;
+	h = rule->match;
+	while(h)
+	{
+		n = h;
+		if(n->comp) pcre_free(n->comp);
+		if(n->expr.s) pkg_free(n->expr.s);
+		h = n->next;
+		pkg_free(n);
 	}
-	if(rule->subst_comp){
-		pcre_free(rule->subst_comp);
-		rule->subst_comp = NULL;
+	h = rule->subst;
+	while(h)
+	{
+		n = h;
+		if(n->comp) pcre_free(n->comp);
+		if(n->expr.s) pkg_free(n->expr.s);
+		h = n->next;
+		pkg_free(n);
 	}
 	if(rule->match_elem){
 		pv_elem_free_all(rule->match_elem);
@@ -1031,20 +1099,40 @@ void list_pv_hash(void)
 
 void list_pv_rule(dpl_pv_node_t * rule)
 {
-	LM_DBG("PV_RULE %p: next %p match_exp %.*s, "
-			"subst_exp %.*s \n", rule, rule->next,
-			rule->match_exp.len, rule->match_exp.s,
-			rule->subst_exp.len, rule->subst_exp.s);
+	pv_elem_p e;
+	int num;
+	dpl_pv_regex_node_p n;
+	LM_DBG("PV_RULE[%p]: next[%p]\n", rule, rule->next);
+	for(e=rule->match_elem, num=0; e!=NULL; e=e->next, num++)
+	{
+		LM_DBG("match_elem[%d][%p][%.*s][%p]\n", num, e, e->text.len,
+			e->text.s, e->spec);
+	}
+	for(n=rule->match, num=0;n!=NULL;n=n->next, num++)
+	{
+		LM_DBG("match[%d] expr:%.*s\n", num, n->expr.len, n->expr.s);
+		num++;
+	}
+	for(e=rule->subst_elem, num=0; e!=NULL; e=e->next, num++)
+	{
+		LM_DBG("subst_elem[%d][%p][%.*s][%p]\n", num, e, e->text.len,
+			e->text.s, e->spec);
+	}
+	for(n=rule->subst, num=0;n!=NULL;n=n->next, num++)
+	{
+		LM_DBG("subst[%d] expr:%.*s\n", num, n->expr.len, n->expr.s);
+		num++;
+	}
 }
 
 void show_pv_flags(unsigned int flag)
 {
 	if(flag&DP_PV_MATCH) LM_DBG("DP_PV_MATCH\n");
 	if(flag&DP_PV_MATCH_M) LM_DBG("DP_PV_MATCH_M\n");
-	if(flag&DP_PV_MATCH_MASK) LM_DBG("DP_PV_MATCH_MASK\n");
 	if(flag&DP_PV_SUBST) LM_DBG("DP_PV_SUBST\n");
 	if(flag&DP_PV_SUBST_M) LM_DBG("DP_PV_SUBST_M\n");
-	if(flag&DP_PV_SUBST_MASK) LM_DBG("DP_PV_SUBST_MASK\n");
+	if(flag&DP_PV_MATCH_AVP) LM_DBG("DP_PV_MATCH_AVP\n");
+	if(flag&DP_PV_SUBST_AVP) LM_DBG("DP_PV_SUBST_AVP\n");
 	if(flag&DP_PV_MASK) LM_DBG("DP_PV_MASK\n");
 	LM_DBG("--pv_flags:%d\n", flag);
 }
