@@ -30,6 +30,7 @@ Build-Depends: bison,
                libperl-dev,
                libpq-dev,
                libpurple-dev,
+               librabbitmq-dev,
                libreadline-dev,
                libsasl2-dev,
                libsctp-dev,
@@ -575,6 +576,20 @@ Description: authentication using ephemeral credentials module for Kamailio
  per second even on low-budget hardware.
  .
  This package provides the ephemeral module for Kamailio.
+
+Package: kamailio-kazoo-modules
+Architecture: linux-any
+Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends}
+Depends: kamailio (= ${binary:Version}),
+         ${misc:Depends},
+         ${shlibs:Depends}
+Description: kazoo modules for Kamailio
+ Kamailio is a very fast and flexible SIP (RFC3261)
+ proxy server. Written entirely in C, Kamailio can handle thousands calls
+ per second even on low-budget hardware.
+ .
+ This package provides the kazoo module for Kamailio.
 
 Package: kamailio-extra-modules
 Architecture: linux-any
