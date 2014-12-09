@@ -63,6 +63,7 @@ extern str repl_exp_column;
 extern str attrs_column; 
 
 int init_db_data();
+int init_pv_data();
 int dp_connect_db();
 void dp_disconnect_db();
 

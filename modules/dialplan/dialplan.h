@@ -44,6 +44,15 @@
 #define DP_REGEX_OP		1
 #define DP_FNMATCH_OP	2
 
+#define DP_PV_MATCH		(1 << 0)
+#define DP_PV_MATCH_M	(1 << 1) /* PV_MARKER at the end */
+#define DP_PV_SUBST		(1 << 2)
+#define DP_PV_SUBST_M	(1 << 3) /* PV_MARKER at the end */
+
+#define DP_PV_MASK (DP_PV_MATCH|DP_PV_SUBST)
+#define DP_PV_MATCH_MASK (DP_PV_MATCH|DP_PV_MATCH_M)
+#define DP_PV_SUBST_MASK (DP_PV_SUBST|DP_PV_SUBST_M)
+
 #define MAX_REPLACE_WITH	10
 
 typedef struct dpl_node{
@@ -55,6 +64,7 @@ typedef struct dpl_node{
 	pcre *match_comp, *subst_comp; /*compiled patterns*/
 	struct subst_expr * repl_comp; 
 	str attrs;
+	unsigned int pv_flags;
 
 	struct dpl_node * next; /*next rule*/
 }dpl_node_t, *dpl_node_p;
@@ -75,6 +85,30 @@ typedef struct dpl_id{
 	struct dpl_id * next;
 }dpl_id_t,*dpl_id_p;
 
+typedef struct dpl_pv_node{
+	pv_elem_p match_elem, subst_elem;
+	str match_exp, subst_exp; /* exp without end dollar char */
+	pcre *match_comp, *subst_comp; /* compiled patterns */
+
+	struct dpl_pv_node * next; /* next rule */
+	struct dpl_node * orig; /* shared rule */
+}dpl_pv_node_t, *dpl_pv_node_p;
+
+/*For every distinct length of a matching string*/
+typedef struct dpl_pv_index{
+	int len;
+	dpl_pv_node_t * first_rule;
+	dpl_pv_node_t * last_rule;
+
+	struct dpl_pv_index * next;
+}dpl_pv_index_t, *dpl_pv_index_p;
+
+/*For every DPID*/
+typedef struct dpl_pv_id{
+	int dp_id;
+	dpl_pv_index_t* first_index;/*fast access :rules with specific length*/
+	struct dpl_pv_id * next;
+}dpl_pv_id_t,*dpl_pv_id_p;
 
 #define DP_VAL_INT		0
 #define DP_VAL_SPEC		1
@@ -92,9 +126,10 @@ void destroy_data();
 int dp_load_db();
 
 dpl_id_p select_dpid(int id);
+dpl_pv_id_p select_pv_dpid(int id);
 
 struct subst_expr* repl_exp_parse(str subst);
 void repl_expr_free(struct subst_expr *se);
 int translate(struct sip_msg *msg, str user_name, str* repl_user, dpl_id_p idp, str *);
-int rule_translate(struct sip_msg *msg, str , dpl_node_t * rule,  str *);
+int rule_translate(struct sip_msg *msg, str , dpl_node_t * rule, dpl_pv_node_t * rule_pv, str *);
 #endif
