@@ -139,7 +139,10 @@
         <itemizedlist>
           <listitem>
             <para>
-              <emphasis>dialog</emphasis> module 
+              <emphasis>pv</emphasis> module
+            </para>
+            <para>
+              <emphasis>dialog</emphasis> module
             </para>
           </listitem>
         </itemizedlist>
