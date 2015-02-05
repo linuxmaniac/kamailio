@@ -85,10 +85,12 @@ extern int ul_db_raw_fetch_type;
  * \param flags contact flags
  * \param part_idx part index
  * \param part_max maximal part
+ * \param options GAU_OPT_* bit field
  * \return 0 on success, positive if buffer size was not sufficient, negative on failure
  */
 static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
-								unsigned int part_idx, unsigned int part_max)
+								unsigned int part_idx, unsigned int part_max,
+								unsigned int options)
 {
 	static char query_buf[512];
 	static str query_str;
@@ -165,7 +167,7 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
 
 			/* received */
 			addr.s = (char*)VAL_STRING(ROW_VALUES(row));
-			if ( VAL_NULL(ROW_VALUES(row)) || addr.s==0 || addr.s[0]==0 ) {
+			if ( VAL_NULL(ROW_VALUES(row)) || addr.s==0 || addr.s[0]==0 || (options & GAU_OPT_ONLY_CONTACT) ) {
 				/* contact */
 				addr.s = (char*)VAL_STRING(ROW_VALUES(row)+1);
 				if (VAL_NULL(ROW_VALUES(row)+1) || addr.s==0 || addr.s[0]==0) {
@@ -286,10 +288,12 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
  * \param flags contact flags
  * \param part_idx part index
  * \param part_max maximal part
+ * \param options GAU_OPT_* bit field
  * \return 0 on success, positive if buffer size was not sufficient, negative on failure
  */
 static inline int get_all_mem_ucontacts(void *buf, int len, unsigned int flags,
-								unsigned int part_idx, unsigned int part_max)
+								unsigned int part_idx, unsigned int part_max,
+								unsigned int options)
 {
 	dlist_t *p;
 	urecord_t *r;
@@ -347,7 +351,7 @@ static inline int get_all_mem_ucontacts(void *buf, int len, unsigned int flags,
 						}
 					}
 
-					if (c->received.s) {
+					if (c->received.s && !(options & GAU_OPT_ONLY_CONTACT)) {
 						needed = (int)(sizeof(c->received.len)
 								+ c->received.len
 								+ sizeof(c->sock) + sizeof(c->cflags)
@@ -458,15 +462,33 @@ static inline int get_all_mem_ucontacts(void *buf, int len, unsigned int flags,
  * \param flags contact flags
  * \param part_idx part index
  * \param part_max maximal part
+ * \param options GAU_OPT_* bit field
  * \return 0 on success, positive if buffer size was not sufficient, negative on failure
  */
 int get_all_ucontacts(void *buf, int len, unsigned int flags,
 								unsigned int part_idx, unsigned int part_max)
 {
+	return get_all_ucontacts_opt(buf, len, flags, part_idx, part_max, 0);
+}
+
+
+/*
+ * \param buf target buffer
+ * \param len length of buffer
+ * \param flags contact flags
+ * \param part_idx part index
+ * \param part_max maximal part
+ * \param options GAU_OPT_* bit field
+ * \return 0 on success, positive if buffer size was not sufficient, negative on failure
+ */
+int get_all_ucontacts_opt(void *buf, int len, unsigned int flags,
+								unsigned int part_idx, unsigned int part_max,
+								unsigned int options)
+{
 	if (db_mode==DB_ONLY)
-		return get_all_db_ucontacts( buf, len, flags, part_idx, part_max);
+		return get_all_db_ucontacts( buf, len, flags, part_idx, part_max, options);
 	else
-		return get_all_mem_ucontacts( buf, len, flags, part_idx, part_max);
+		return get_all_mem_ucontacts( buf, len, flags, part_idx, part_max, options);
 }
 
 

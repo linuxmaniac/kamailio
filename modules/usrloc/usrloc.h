@@ -40,6 +40,8 @@
 #define DB_ONLY       3
 #define DB_READONLY   4
 
+#define GAU_OPT_ONLY_CONTACT   (1<<0)  /* ignore "received" address and always return contact */
+
 /*forward declaration necessary for udomain*/
 
 struct udomain;
@@ -179,6 +181,9 @@ typedef int (*register_udomain_t)(const char* _n, struct udomain** _d);
 typedef int  (*get_all_ucontacts_t) (void* buf, int len, unsigned int flags,
 		unsigned int part_idx, unsigned int part_max);
 
+typedef int  (*get_all_ucontacts_opt_t) (void* buf, int len, unsigned int flags,
+		unsigned int part_idx, unsigned int part_max, unsigned int options);
+
 typedef int (*get_udomain_t)(const char* _n, udomain_t** _d);
 
 typedef unsigned int (*ul_get_aorhash_t)(str *_aor);
@@ -199,6 +204,7 @@ typedef struct usrloc_api {
 	register_udomain_t   register_udomain;
 	get_udomain_t        get_udomain;
 	get_all_ucontacts_t  get_all_ucontacts;
+	get_all_ucontacts_opt_t get_all_ucontacts_opt;
 
 	insert_urecord_t     insert_urecord;
 	delete_urecord_t     delete_urecord;
