@@ -344,6 +344,7 @@ static int sipping_flag = -1;
 static int natping_disable_flag = -1;
 static int natping_processes = 1;
 static int contact_only = 0;
+static int filter_socket = 0;
 
 static str nortpproxy_str = str_init("a=nortpproxy:yes");
 
@@ -428,6 +429,7 @@ static param_export_t params[] = {
 	{"udpping_from_path",     INT_PARAM, &udpping_from_path     },
 	{"append_sdp_oldmediaip", INT_PARAM, &sdp_oldmediaip        },
 	{"contact_only",          INT_PARAM, &contact_only          },
+	{"filter_socket",         INT_PARAM, &filter_socket         },
 
 	{0, 0, 0}
 };
@@ -2066,6 +2068,7 @@ nh_timer(unsigned int ticks, void *timer_idx)
 	char *path_ip_str = NULL;
 	unsigned int path_ip = 0;
 	unsigned short path_port = 0;
+	unsigned int options = 0;
 
 	if((*natping_state) == 0)
 		goto done;
@@ -2078,10 +2081,13 @@ nh_timer(unsigned int ticks, void *timer_idx)
 			goto done;
 		}
 	}
+
+	if(contact_only) options |= GAU_OPT_ONLY_CONTACT;
+	if(filter_socket) options |= GAU_OPT_FILTER_SOCKET;
+
 	rval = ul.get_all_ucontacts_opt(buf, cblen, (ping_nated_only?ul.nat_flag:0),
 		((unsigned int)(unsigned long)timer_idx)*natping_interval+iteration,
-		natping_processes*natping_interval,
-		contact_only ? GAU_OPT_ONLY_CONTACT : 0);
+		natping_processes*natping_interval, options);
 	if (rval<0) {
 		LM_ERR("failed to fetch contacts\n");
 		goto done;
@@ -2097,8 +2103,7 @@ nh_timer(unsigned int ticks, void *timer_idx)
 		}
 		rval = ul.get_all_ucontacts_opt(buf,cblen,(ping_nated_only?ul.nat_flag:0),
 		   ((unsigned int)(unsigned long)timer_idx)*natping_interval+iteration,
-		   natping_processes*natping_interval,
-		   contact_only ? GAU_OPT_ONLY_CONTACT : 0);
+		   natping_processes*natping_interval, options);
 		if (rval != 0) {
 			pkg_free(buf);
 			goto done;
