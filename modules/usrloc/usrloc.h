@@ -41,6 +41,7 @@
 #define DB_READONLY   4
 
 #define GAU_OPT_ONLY_CONTACT   (1<<0)  /* ignore "received" address and always return contact */
+#define GAU_OPT_FILTER_SOCKET  (1<<1)  /* filter query by socket field */
 
 /*forward declaration necessary for udomain*/
 

@@ -71,12 +71,34 @@ static inline int find_dlist(str* _n, dlist_t** _d)
 	return 1;
 }
 
+int sprint_all_socket_lists(char **buf, int len)
+{
+	struct socket_info *si;
+	struct socket_info** list;
+	unsigned short proto=PROTO_UDP;
+	unsigned int pos = 0;
+	char *s = *buf;
+
+
+	list=get_sock_info_list(proto); /* only UDP */
+	for(si=list?*list:0; si; si=si->next){
+		LM_DBG("pos:%d size:%d\n", pos, si->sock_str.len);
+		if ((pos + si->sock_str.len + 4) > len) return -1;
+		snprintf(s + pos, len-pos, ",'%s'", si->sock_str.s);
+		pos = pos + si->sock_str.len;
+	}
+
+	s[0] = '('; s[pos] = ')'; pos = pos + 1;
+	LM_DBG("pos:%d [%.*s]\n", pos, pos, s);
+	return pos;
+}
+
 extern int ul_db_raw_fetch_type;
 
 #define UL_DB_RAW_FETCH_COMMON	 "select %.*s, %.*s, %.*s, %.*s, %.*s, %.*s from %s where %.*s > %.*s and %.*s & %d = %d and id %% %u = %u"
-
+#define UL_DB_RAW_FETCH_SOCK_COMMON	 "select %.*s, %.*s, %.*s, %.*s, %.*s, %.*s from %s where %.*s > %.*s and %.*s & %d = %d and id %% %u = %u and %.*s in %.*s"
 #define UL_DB_RAW_FETCH_ORACLE   "select %.*s, %.*s, %.*s, %.*s, %.*s, %.*s from %s where %.*s > %.*s and  bitand(%.*s, %d) = %d and mod(id, %u) = %u"
-
+#define UL_DB_RAW_FETCH_SOCK_ORACLE   "select %.*s, %.*s, %.*s, %.*s, %.*s, %.*s from %s where %.*s > %.*s and  bitand(%.*s, %d) = %d and mod(id, %u) = %u and %.*s in %.*s"
 /*!
  * \brief Get all contacts from the database, in partitions if wanted
  * \see get_all_ucontacts
@@ -93,6 +115,8 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
 								unsigned int options)
 {
 	static char query_buf[512];
+	static char socket_list[256];
+	static str socket_str;
 	static str query_str;
 
 	struct socket_info *sock;
@@ -112,6 +136,25 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
 	int i;
 	void *cp;
 	int shortage, needed;
+	char *query_format = NULL;
+
+	if (options & GAU_OPT_FILTER_SOCKET)
+	{
+		socket_str.s = socket_list;
+		socket_str.len = sprint_all_socket_lists(&socket_str.s, 256);
+		if(socket_str.len<0) {
+			LM_ERR("error generating socket_list parameter\n");
+			return -1;
+		}
+		LM_DBG("socket_str[%d]:[%.*s]\n", socket_str.len, socket_str.len, socket_str.s);
+		query_format = (ul_db_raw_fetch_type==1)?
+					UL_DB_RAW_FETCH_SOCK_ORACLE:UL_DB_RAW_FETCH_SOCK_COMMON;
+	}
+	else
+	{
+		query_format = (ul_db_raw_fetch_type==1)?
+					UL_DB_RAW_FETCH_ORACLE:UL_DB_RAW_FETCH_COMMON;
+	}
 
 	if(ul_dbf.raw_query==NULL) {
 		LM_WARN("DB raw query support is required, but not implemented\n");
@@ -134,8 +177,7 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
 	for (dom = root; dom!=NULL ; dom=dom->next) {
 		/* build query */
 		i = snprintf( query_buf, sizeof(query_buf),
-			(ul_db_raw_fetch_type==1)?
-					UL_DB_RAW_FETCH_ORACLE:UL_DB_RAW_FETCH_COMMON,
+			query_format,
 			received_col.len, received_col.s,
 			contact_col.len, contact_col.s,
 			sock_col.len, sock_col.s,
@@ -146,7 +188,9 @@ static inline int get_all_db_ucontacts(void *buf, int len, unsigned int flags,
 			expires_col.len, expires_col.s,
 			now_len, now_s,
 			cflags_col.len, cflags_col.s,
-			flags, flags, part_max, part_idx);
+			flags, flags, part_max, part_idx,
+			sock_col.len, sock_col.s,
+			socket_str.len, socket_str.s);
 		if ( i>=sizeof(query_buf) ) {
 			LM_ERR("DB query too long\n");
 			return -1;
@@ -350,7 +394,10 @@ static inline int get_all_mem_ucontacts(void *buf, int len, unsigned int flags,
 							}
 						}
 					}
-
+					if(c->sock!=NULL && (options & GAU_OPT_FILTER_SOCKET)) {
+						if(lookup_local_socket(&c->sock->sock_str)!=c->sock)
+							continue;
+					}
 					if (c->received.s && !(options & GAU_OPT_ONLY_CONTACT)) {
 						needed = (int)(sizeof(c->received.len)
 								+ c->received.len
