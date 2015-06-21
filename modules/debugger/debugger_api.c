@@ -222,6 +222,7 @@ typedef struct _dbg_pid
 	unsigned int reset_msgid; /* flag to reset the id */
 	unsigned int msgid_base; /* real id since the reset */
 	dbg_cfgt_node_p cfgt_node;
+	unsigned int cfgt_save; /* flag (1 == ALL, 2 == uuid ) */
 } dbg_pid_t;
 
 /**
@@ -241,6 +242,20 @@ int dbg_set_cfgt_node(dbg_cfgt_node_p node) {
 		return 1;
 	}
 	return 0;
+}
+
+unsigned int dbg_get_cfgt_save(void) {
+	unsigned int save = 0;
+
+	lock_get(_dbg_pid_list[process_no].lock);
+	if(_dbg_pid_list[process_no].cfgt_save!=0)
+	{
+		LM_DBG("cfgt_save!\n");
+		save = _dbg_pid_list[process_no].cfgt_save;
+		_dbg_pid_list[process_no].cfgt_save = 0;
+	}
+	lock_release(_dbg_pid_list[process_no].lock);
+	return save;
 }
 
 /**
@@ -1088,6 +1103,53 @@ static void dbg_rpc_reset_msgid(rpc_t* rpc, void* ctx){
 	rpc->add(ctx, "s", "200 ok");
 }
 
+static const char* dbg_rpc_cfgt_dump_doc[2] = {
+	"Dump cfgtest",
+	0
+};
+
+static void dbg_rpc_cfgt_dump(rpc_t* rpc, void* ctx){
+	int i;
+	str uuid = STR_NULL;
+	if (_dbg_cfgtest==0)
+	{
+		rpc->fault(ctx, 500, "cfgtest is 0. Set it to 1 to enable.");
+		return;
+	}
+	if(_dbg_pid_list==NULL)
+	{
+		rpc->fault(ctx, 500, "_dbg_pid_list is NULL");
+		return;
+	}
+	if(rpc->scan(ctx, "*S", &uuid)!=1)
+	{
+		uuid.len = 0;
+	}
+	LM_DBG("uuid[%.*s]\n", uuid.len, uuid.s);
+	if (dbg_cfgt_set_save(&uuid)<0) {
+		rpc->fault(ctx, 500, "No more shared memory left");
+		return;
+	}
+	for(i=0; i<_dbg_pid_no; i++)
+	{
+		if (_dbg_pid_list[i].lock!=NULL)
+		{
+			lock_get(_dbg_pid_list[i].lock);
+			if(uuid.len>0)
+			{
+				_dbg_pid_list[i].cfgt_save = 2;
+			}
+			else
+			{
+				_dbg_pid_list[i].cfgt_save = 1;
+			}
+			lock_release(_dbg_pid_list[i].lock);
+		}
+	}
+
+	rpc->add(ctx, "s", "200 ok");
+}
+
 /**
  *
  */
@@ -1098,6 +1160,7 @@ rpc_export_t dbg_rpc[] = {
 	{"dbg.mod_level", dbg_rpc_mod_level, dbg_rpc_mod_level_doc, 0},
 	{"dbg.mod_facility", dbg_rpc_mod_facility, dbg_rpc_mod_facility_doc, 0},
 	{"dbg.reset_msgid", dbg_rpc_reset_msgid, dbg_rpc_reset_msgid_doc, 0},
+	{"dbg.cfgt_dump", dbg_rpc_cfgt_dump, dbg_rpc_cfgt_dump_doc, 0},
 	{0, 0, 0, 0}
 };
 

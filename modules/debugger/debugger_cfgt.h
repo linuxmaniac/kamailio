@@ -67,4 +67,5 @@ int dbg_cfgt_process_route(struct sip_msg *msg,
 int dbg_cfgt_filter(struct sip_msg *msg, unsigned int flags, void *bar);
 int dbg_cfgt_msgint(void *data);
 int dbg_cfgt_msgout(void *data);
+int dbg_cfgt_set_save(str *uuid);
 #endif

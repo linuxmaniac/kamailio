@@ -34,8 +34,8 @@ static str _dbg_cfgt_route_prefix[] = {
 	str_init("return|"),
 	{0, 0}
 };
-dbg_cfgt_node_p _dbg_cfgt_head = NULL;
-dbg_cfgt_hash_p _dbg_cfgt_uuid = NULL;
+static dbg_cfgt_node_t *_dbg_cfgt_head = NULL;
+static dbg_cfgt_hash_t *_dbg_cfgt_uuid = NULL;
 str _dbg_cfgt_basedir = {"/tmp/", 5};
 str _dbg_cfgt_hdr_name = {"P-NGCP-CFGTEST", 14};
 
@@ -76,11 +76,11 @@ int _dbg_cfgt_pv_parse(str *param, pv_elem_p *elem)
 	}
 	return 0;
 }
-
+/** TODO fix clist_foreach */
 void _dbg_cfgt_remove_uuid(const str *uuid)
 {
 	struct str_hash_head *head;
-	struct str_hash_entry *entry, *back;
+	struct str_hash_entry *entry;
 	int i;
 
 	if(_dbg_cfgt_uuid==NULL) return;
@@ -104,7 +104,7 @@ void _dbg_cfgt_remove_uuid(const str *uuid)
 		for(i=0; i<DBG_CFGT_HASH_SIZE; i++)
 		{
 			head = _dbg_cfgt_uuid->hash.table+i;
-			clist_foreach_safe(head, entry, back, next)
+			clist_foreach(head, entry, prev, next)
 			{
 				LM_DBG("uuid[%.*s] removed from hash\n",
 					entry->key.len, entry->key.s);
@@ -536,10 +536,33 @@ int dbg_cfgt_msgin(void *data)
 	return -1;
 }
 
+/* defined later */
+int _dbg_cfgt_save(str *uuid);
+
 int dbg_cfgt_filter(struct sip_msg *msg, unsigned int flags, void *bar)
 {
+	unsigned int save;
+	str uuid = STR_NULL;
 	str unknown = {"unknown", 7};
 	dbg_cfgt_node_p node;
+
+	save = dbg_get_cfgt_save();
+	if(save==2)
+	{
+		lock_get(&_dbg_cfgt_uuid->lock);
+		if(_dbg_cfgt_uuid->save_uuid.s)
+		{
+			pkg_str_dup(&uuid, &_dbg_cfgt_uuid->save_uuid);
+		}
+		lock_release(&_dbg_cfgt_uuid->lock);
+	}
+	if(save!=0)
+	{
+		if (uuid.len>0) LM_DBG("saving [%.*s]\n", uuid.len, uuid.s);
+		else LM_DBG("saving ALL\n");
+		if (_dbg_cfgt_save(&uuid)<0) LM_ERR("not saved\n");
+		else LM_DBG("saved\n");
+	}
 
 	node = dbg_get_cfgt_node();
 	if(node)
@@ -615,5 +638,160 @@ int dbg_init_cfgtest(void)
 		return -1;
 	sr_event_register_cb(SREV_NET_DATA_IN, dbg_cfgt_msgin);
 	sr_event_register_cb(SREV_NET_DATA_OUT, dbg_cfgt_msgout);
+	return 0;
+}
+
+int _dbg_cfgt_get_filename(int msgid, str uuid, str *dest)
+{
+	int i, lid, lpid;
+	char buff_id[INT2STR_MAX_LEN], buff_pid[INT2STR_MAX_LEN];
+	char *sid, *spid;
+	if(dest==NULL || uuid.len == 0) return -1;
+	sid = sint2strbuf(msgid, buff_id, INT2STR_MAX_LEN, &lid);
+	spid = sint2strbuf(my_pid(), buff_pid, INT2STR_MAX_LEN, &lpid);
+	dest->len = _dbg_cfgt_basedir.len + uuid.len + lid + lpid + 8;
+	if(_dbg_cfgt_basedir.s[_dbg_cfgt_basedir.len-1]!='/')
+		dest->len = dest->len + 1;
+	dest->s = (char *) pkg_malloc(dest->len*sizeof(char));
+	if(dest->s==NULL)
+	{
+		LM_ERR("no more memory.\n");
+		return -1;
+	}
+
+	LM_DBG("id:[%.*s] pid:[%.*s] dest.len:[%d]\n", lid, sid,
+		lpid, spid, dest->len);
+	strncpy(dest->s, _dbg_cfgt_basedir.s, _dbg_cfgt_basedir.len);
+	i = _dbg_cfgt_basedir.len;
+	if(_dbg_cfgt_basedir.s[_dbg_cfgt_basedir.len-1]!='/')
+	{
+		strncpy(dest->s+i, "/", 1);
+		i = i + 1;
+	}
+	strncpy(dest->s+i, uuid.s, uuid.len);
+	i = i + uuid.len;
+	strncpy(dest->s+i, "/", 1);
+	i = i + 1;
+	strncpy(dest->s+i, spid, lpid);
+	i = i + lpid;
+	strncpy(dest->s+i, "_", 1);
+	i = i + 1;
+	strncpy(dest->s+i, sid, lid);
+	i = i + lid;
+	strncpy(dest->s+i, ".json\0", 6);
+	return 0;
+}
+
+int _dbg_cfgt_save_node(dbg_cfgt_node_p node)
+{
+	FILE *f = NULL;
+	str filename = STR_NULL;
+	char *buf = NULL;
+	int res = -1;
+
+	if(!node) return -1;
+	LM_DBG("msgid:%d uuid:%.*s\n", node->msgid, node->uuid.len, node->uuid.s);
+	if(_dbg_cfgt_get_filename(node->msgid, node->uuid, &filename)<0)
+	{
+		LM_ERR("Cannot get filename\n");
+		res = -1;
+		goto clean;
+	}
+	f = fopen ( filename.s, "w");
+	if(f==NULL)
+	{
+		LM_ERR("Cannot open[%.*s] for write\n", filename.len, filename.s);
+		res = -1;
+		goto clean;
+	}
+	buf = srjson_PrintUnformatted(&node->jdoc, node->jdoc.root);
+	if(buf==NULL)
+	{
+		LM_ERR("Cannot get the json string\n");
+		fclose(f);
+		res = -1;
+		goto clean;
+	}
+	fwrite(buf, strlen(buf), 1, f);
+	fclose(f);
+	res = 0;
+
+clean:
+	if(filename.s) pkg_free(filename.s);
+	if(buf) node->jdoc.free_fn(buf);
+	return res;
+}
+
+int _dbg_cfgt_save(str *uuid)
+{
+	int res = -1;
+	dbg_cfgt_node_p node;
+
+	if(_dbg_cfgt_head==NULL || uuid == NULL) return -1;
+	if(uuid->len>0)
+	{
+		node = _dbg_cfgt_head;
+		do
+		{
+			LM_DBG("node->uuid[%.*s]\n", node->uuid.len, node->uuid.s);
+			if(STR_EQ(node->uuid, *uuid))
+			{
+				res = 0;
+				if(_dbg_cfgt_save_node(node)<0)
+				{
+					LM_ERR("Cannot save node:%p\n", node);
+					_dbg_cfgt_print_node(node);
+					res = res - 1;
+				}
+				_dbg_cfgt_remove_node(node);
+			}
+		} while(node->next!=_dbg_cfgt_head);
+		if(res==-1) {
+			LM_WARN("No node with uuid[%.*s] found\n", uuid->len, uuid->s);
+		}
+		else {
+			_dbg_cfgt_remove_uuid(uuid);
+		}
+	}
+	else
+	{
+		res = 0;
+		node = _dbg_cfgt_head;
+		do
+		{
+			if(_dbg_cfgt_save_node(node)<0)
+			{
+				LM_ERR("Cannot save node:%p\n", node);
+				_dbg_cfgt_print_node(node);
+				res = res - 1;
+			}
+			_dbg_cfgt_remove_node(node);
+		} while(node->next!=_dbg_cfgt_head);
+		_dbg_cfgt_remove_uuid(NULL);
+	}
+	return res;
+}
+
+int dbg_cfgt_set_save(str *uuid)
+{
+	if(uuid==NULL) return -1;
+	lock_get(&_dbg_cfgt_uuid->lock);
+	if(_dbg_cfgt_uuid->save_uuid.s)
+	{
+		LM_DBG("free previous uuid\n");
+		shm_free(_dbg_cfgt_uuid->save_uuid.s);
+		_dbg_cfgt_uuid->save_uuid.s = NULL;
+		_dbg_cfgt_uuid->save_uuid.len = 0;
+	}
+	if(uuid->len>0)
+	{
+		if(shm_str_dup(&_dbg_cfgt_uuid->save_uuid, uuid) != 0)
+		{
+			LM_ERR("No shared memory left\n");
+			lock_release(&_dbg_cfgt_uuid->lock);
+			return -1;
+		}
+	}
+	lock_release(&_dbg_cfgt_uuid->lock);
 	return 0;
 }

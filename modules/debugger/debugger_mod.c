@@ -73,6 +73,7 @@ extern int _dbg_step_loops;
 extern int _dbg_reset_msgid;
 extern int _dbg_cfgtest;
 extern str _dbg_cfgt_hdr_name;
+extern str _dbg_cfgt_basedir;
 
 static int _dbg_sip_msg_cline;
 static char * _dbg_cfgtrace_facility_str = 0;
@@ -115,6 +116,7 @@ static param_export_t params[]={
 	{"cfgpkgcheck",       INT_PARAM, &_dbg_cfgpkgcheck},
 	{"cfgtest",           INT_PARAM, &_dbg_cfgtest},
 	{"cfgt_hdr_name",     PARAM_STRING, &_dbg_cfgt_hdr_name},
+	{"cfgt_basedir",      PARAM_STRING, &_dbg_cfgt_basedir},
 	{0, 0, 0}
 };
 

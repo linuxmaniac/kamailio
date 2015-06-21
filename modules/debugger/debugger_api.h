@@ -54,6 +54,7 @@ void dbg_enable_log_assign(void);
 int dbg_msgid_filter(struct sip_msg *msg, unsigned int flags, void *bar);
 dbg_cfgt_node_p dbg_get_cfgt_node(void);
 int dbg_set_cfgt_node(dbg_cfgt_node_p);
+unsigned int dbg_get_cfgt_save(void);
 
 #define DBG_DP_NULL			1
 #define DBG_DP_AVP			2
