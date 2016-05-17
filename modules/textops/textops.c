@@ -2069,7 +2069,6 @@ static int get_body_part_helper(sip_msg_t* msg, char* ctype, char* ovar, int mod
 	start = body.s;
 	len = body.len;
 
-	/* note: header body can follow just after name: - fixit */
 	while (find_line_start("Content-Type: ", 14, &start, &len))
 	{
 		end = start + 14;
@@ -2087,7 +2086,8 @@ static int get_body_part_helper(sip_msg_t* msg, char* ctype, char* ovar, int mod
 				}
 				end = end + 2;
 				len = len - content_type.len - 2;
-				body_headers_end = end;
+				/* \r\n should always separate headers from the body */
+				body_headers_end = find_line_start("\r\n", 2, &start, &len);
 				if (find_line_start(boundary.s, boundary.len, &end,
 					&len))
 				{
