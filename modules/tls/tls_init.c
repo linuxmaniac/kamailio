@@ -517,6 +517,42 @@ int tls_mod_pre_init_h(void)
 }
 
 /*
+ * OpenSSL version numbers: MNNFFPPS: major minor fix patch status
+ * We match major, minor, fix and status (not patch) for <1.0.0.
+ * After that, we accept compatible fix and status versions (so we
+ * allow 1.0.1 to work with 1.0.0). Going backwards is only allowed
+ * within a patch series.
+ *
+ * Copyright (c) 2005 Darren Tucker <dtucker@zip.com.au>
+ */
+
+int tls_compatible_openssl(long headerver, long libver)
+{
+	long mask, hfix, lfix;
+
+	/* exact match is always OK */
+	if (headerver == libver)
+		return 1;
+
+	/* for versions < 1.0.0, major,minor,fix,status must match */
+	if (headerver < 0x1000000f) {
+		mask = 0xfffff00fL; /* major,minor,fix,status */
+		return (headerver & mask) == (libver & mask);
+	}
+
+	/*
+	 * For versions >= 1.0.0, major,minor must match and library
+	 * fix version must be equal to or newer than the header.
+	 */
+	mask = 0xfff00000L; /* major,minor */
+	hfix = (headerver & 0x000ff000) >> 12;
+	lfix = (libver & 0x000ff000) >> 12;
+	if ( (headerver & mask) == (libver & mask) && lfix >= hfix)
+		return 1;
+	return 0;
+}
+
+/*
  * First step of TLS initialization
  */
 int init_tls_h(void)
@@ -546,7 +582,7 @@ int init_tls_h(void)
 	ssl_version=SSLeay();
 	/* check if version have the same major minor and fix level
 	 * (e.g. 0.9.8a & 0.9.8c are ok, but 0.9.8 and 0.9.9x are not) */
-	if ((ssl_version>>8)!=(OPENSSL_VERSION_NUMBER>>8)){
+	if (tls_compatible_openssl(OPENSSL_VERSION_NUMBER, ssl_version) == 0) {
 		LOG(L_CRIT, "ERROR: tls: init_tls_h: installed openssl library "
 				"version is too different from the library the Kamailio tls module "
 				"was compiled with: installed \"%s\" (0x%08lx), compiled "
