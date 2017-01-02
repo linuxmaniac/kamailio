@@ -114,6 +114,8 @@ LD_EXTRA_OPTS := $(shell dpkg-buildflags --get LDFLAGS)
 # https://wiki.debian.org/ReproducibleBuilds/
 CC_EXTRA_OPTS += -DVERSION_NODATE
 
+CC_EXTRA_OPTS += -DMEM_VALGRIND
+
 configure: configure-stamp
 configure-stamp:
 	dh_testdir

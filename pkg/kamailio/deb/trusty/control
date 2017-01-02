@@ -46,6 +46,7 @@ Build-Depends: bison,
                python-dev,
                unixodbc-dev,
                uuid-dev,
+               valgrind,
                xsltproc,
                zlib1g-dev
 Standards-Version: 3.9.5
