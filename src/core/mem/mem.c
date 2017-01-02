@@ -93,6 +93,12 @@ int init_pkg_mallocs(void)
 		return -1;
 	}
 	#endif
+	#ifdef MEM_VALGRIND
+	if (mem_pool)
+		VALGRIND_CREATE_MEMPOOL(mem_pool, 0, 1);
+	if (mem_block)
+		VALGRIND_MAKE_MEM_NOACCESS(mem_block, pkg_mem_size);
+	#endif
 #endif
 	return 0;
 }
@@ -108,6 +114,9 @@ void destroy_pkg_mallocs(void)
 	#ifndef DL_MALLOC
 		if (mem_pool) {
 			free(mem_pool);
+			#ifdef MEM_VALGRIND
+			VALGRIND_DESTROY_MEMPOOL(mem_pool);
+			#endif
 			mem_pool = 0;
 		}
 	#endif

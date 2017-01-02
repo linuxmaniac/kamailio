@@ -417,6 +417,9 @@ void* qm_malloc(void* qmp, size_t size)
 			sr_event_exec(SREV_PKG_UPDATE_STATS, 0);
 		}
 #endif
+#ifdef MEM_VALGRIND
+		VALGRIND_MEMPOOL_ALLOC(qmp, (char*)f+sizeof(struct qm_frag), size);
+#endif
 		return (char*)f+sizeof(struct qm_frag);
 	}
 
@@ -551,6 +554,9 @@ void qm_free(void* qmp, void* p)
 	if(qm->type==MEM_TYPE_PKG) {
 		sr_event_exec(SREV_PKG_UPDATE_STATS, 0);
 	}
+#endif
+#ifdef MEM_VALGRIND
+	VALGRIND_MEMPOOL_FREE(qm, f);
 #endif
 }
 

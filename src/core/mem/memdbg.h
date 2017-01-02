@@ -28,6 +28,10 @@
 
 #include "../cfg/cfg.h" /* memdbg*/
 
+#ifdef MEM_VALGRIND
+#include <valgrind/memcheck.h>
+#endif
+
 extern int memdbg;
 
 #ifdef NO_DEBUG

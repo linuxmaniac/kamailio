@@ -193,7 +193,11 @@ int shm_mem_init_mallocs(void* mempool, unsigned long pool_size)
 #endif  /*SHM SAFE_MALLOC */
 	
 	DBG("shm_mem_init: success\n");
-	
+
+#ifdef MEM_VALGRIND
+	VALGRIND_CREATE_MEMPOOL(mempool, 0, 0);
+	VALGRIND_MAKE_MEM_NOACCESS(shm_block, pool_size);
+#endif
 	return 0;
 }
 
@@ -247,6 +251,9 @@ void shm_mem_destroy(void)
 		munmap(shm_mempool, /* SHM_MEM_SIZE */ shm_mem_size );
 #else
 		shmdt(shm_mempool);
+#endif
+#ifdef MEM_VALGRIND
+		VALGRIND_DESTROY_MEMPOOL(shm_mempool);
 #endif
 		shm_mempool=(void*)-1;
 	}

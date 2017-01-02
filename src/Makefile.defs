@@ -543,6 +543,8 @@ data_target = $(prefix)/$(data_dir)
 #		issues additional debugging information if lock/unlock is called
 # -DMEM_JOIN_FREE
 #		enable the join of free memory chunks (see also mem_join cfg param)
+# -DMEM_VALGRIND
+#		enable valgrind memory check helper support
 # -DFAST_LOCK
 #		uses fast arhitecture specific locking (see the arh. specific section)
 # -DUSE_SYSV_SEM
@@ -674,7 +676,8 @@ C_DEFS= $(extra_defs) \
 	 #-DSTATS \
 	 #-DNO_LOG \
 	 #-DPROFILING \
-	 #-DNO_SIG_DEBUG
+	 #-DNO_SIG_DEBUG \
+	 #-DMEM_VALGRIND \
 
 #PROFILE=  -pg	# set this if you want profiling
 				# you may also want to set -DPROFILING
