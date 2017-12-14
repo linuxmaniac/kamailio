@@ -43,7 +43,7 @@ if [[ "${CC}" =~ clang ]] ; then
 	update-alternatives --install /usr/bin/clang clang "${CLANG}" 1
 fi
 
-echo "environment DIST=$DIST CC=$CC"
+echo "environment DIST=$DIST CC=$CC MODE=$MODE"
 ${CC} --version
 
 _clean

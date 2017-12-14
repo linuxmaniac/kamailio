@@ -21,6 +21,8 @@ include /usr/share/dpkg/buildflags.mk
 export JAVA_HOME=/usr/lib/jvm/java-gcj
 export RADCLI=1
 
+MODE ?= release
+
 # modules not in the "main" kamailio package
 EXCLUDED_MODULES=
 
@@ -125,6 +127,7 @@ configure-stamp:
 			skip_modules="$(EXCLUDED_MODULES) $(EXTRA_EXCLUDED_MODULES)" \
 			CC_EXTRA_OPTS="$(CC_EXTRA_OPTS)" \
 			LD_EXTRA_OPTS="$(LD_EXTRA_OPTS)" \
+			mode=$(MODE) \
 			group_include="kstandard"
 
 	touch configure-stamp
