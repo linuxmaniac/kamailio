@@ -839,6 +839,9 @@ int ipsec_create(struct sip_msg *m, udomain_t *d, int _cflags)
 		goto cleanup;
 	}
 
+	// keep reg_state value
+	ci.reg_state = pcontact->reg_state;
+
 	// Get security parameters
 	if(pcontact->security_temp == NULL) {
 		LM_ERR("No security parameters found in contact\n");
