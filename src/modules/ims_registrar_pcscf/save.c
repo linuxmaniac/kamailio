@@ -285,6 +285,8 @@ static inline int update_contacts(struct sip_msg *req, struct sip_msg *rpl,
 							// rather than delete update the pcontact with expire value of 10 seconds
 							ci.expires = local_time_now
 										 + _imsregp_params.delete_delay;
+							// keep reg_state value
+							ci.reg_state = pcontact->reg_state;
 							if(ul.update_pcontact(_d, &ci, pcontact) != 0) {
 								LM_DBG("failed to update pcscf contact on "
 									   "de-register\n");

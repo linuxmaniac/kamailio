@@ -229,6 +229,8 @@ int process_contact(
 			} else {
 				// rather than delete update the pcontact with expire value
 				ci.expires = local_time_now + _imsregp_params.delete_delay;
+				// keep reg_state value
+				ci.reg_state = pcontact->reg_state;
 				if(ul.update_pcontact(_d, &ci, pcontact) != 0) {
 					LM_DBG("failed to update pcscf contact on de-register\n");
 				}
